@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "unity-mcp": {
+      "command": "node",
+      "args": [
+        "C:/Users/heita/Documents/UnityMCP/build/index.js"
+      ]
+    }
+  }
+}
