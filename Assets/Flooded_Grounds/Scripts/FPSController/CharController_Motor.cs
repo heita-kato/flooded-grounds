@@ -4,6 +4,15 @@ using UnityEngine;
 
 public class CharController_Motor : MonoBehaviour {
 
+    public enum MoveState { Idle, Walk, Run, Jump, Fall }
+
+    [System.Serializable]
+    public class TransitionBlendSetting {
+        public MoveState from = MoveState.Idle;
+        public MoveState to = MoveState.Walk;
+        public float blendTime = 0.1f;
+    }
+
     // --- 移動 ---
     public float walkSpeed = 10.0f;
     public float runSpeed = 20.0f;
@@ -13,6 +22,7 @@ public class CharController_Motor : MonoBehaviour {
     public float acceleration = 1.0f;
     public float deceleration = 18.0f;
     public float WaterHeight = 15.5f;
+    public float waterSurfaceSupportDepth = 1.2f;
     public float groundStickForce = 2.0f;
     public float inputDeadZone = 0.2f;
 
@@ -40,6 +50,9 @@ public class CharController_Motor : MonoBehaviour {
     public float jumpBlend  = 0.05f;
     public float fallBlend  = 0.10f;
 
+    // from -> to ごとのブレンド時間上書き（未設定時は各ステートの既定値を使用）
+    public List<TransitionBlendSetting> transitionBlendOverrides = new List<TransitionBlendSetting>();
+
     public bool webGLRightClickRotation = true;
 
     // --- 内部状態 ---
@@ -52,7 +65,6 @@ public class CharController_Motor : MonoBehaviour {
     bool isJumping;     // ジャンプ上昇中フラグ
 
     // アニメーション状態
-    enum MoveState { Idle, Walk, Run, Jump, Fall }
     MoveState currentAnim = MoveState.Idle;
 
     // ハッシュキャッシュ
@@ -114,6 +126,7 @@ public class CharController_Motor : MonoBehaviour {
             horizontalSpeed = 0f;
 
         CheckForWaterHeight();
+        bool isGroundedLike = character.isGrounded || IsWithinWaterSurfaceSupportRange();
 
         // --- 水平移動 ---
         Vector3 inputDir = Vector3.ClampMagnitude(new Vector3(moveFB, 0f, moveLR), 1f);
@@ -125,9 +138,13 @@ public class CharController_Motor : MonoBehaviour {
         }
 
         // --- 垂直速度（重力・ジャンプ） ---
-        if (character.isGrounded){
+        if (isGroundedLike){
             if (verticalVelocity < 0f){
-                verticalVelocity = -groundStickForce;
+                if (character.isGrounded)
+                    verticalVelocity = -groundStickForce;
+                else
+                    verticalVelocity = 0f;
+
                 isJumping = false;
             }
             // ジャンプ入力
@@ -146,7 +163,7 @@ public class CharController_Motor : MonoBehaviour {
         character.Move(finalMovement * Time.deltaTime);
 
         // --- アニメーション更新 ---
-        UpdateAnimator(hasInput, isRunning);
+        UpdateAnimator(hasInput, isRunning, isGroundedLike);
     }
 
     Vector3 GetCameraRelativeMove(Vector3 inputDirection){
@@ -158,12 +175,12 @@ public class CharController_Motor : MonoBehaviour {
         return Vector3.ClampMagnitude(fwd * inputDirection.z + right * inputDirection.x, 1f);
     }
 
-    void UpdateAnimator(bool hasInput, bool isRunning){
+    void UpdateAnimator(bool hasInput, bool isRunning, bool isGroundedLike){
         if (animator == null) return;
 
         // 優先度：空中(ジャンプ/落下) > 走る > 歩く > 待機
         MoveState targetAnim;
-        if (!character.isGrounded){
+        if (!isGroundedLike){
             targetAnim = isJumping ? MoveState.Jump : MoveState.Fall;
         } else if (hasInput && isRunning){
             targetAnim = MoveState.Run;
@@ -180,52 +197,52 @@ public class CharController_Motor : MonoBehaviour {
         bool transitioned = false;
         MoveState resolvedAnim = targetAnim;
 
-        if (TryCrossFade(targetAnim)){
+        if (TryCrossFade(currentAnim, targetAnim)){
             transitioned = true;
             resolvedAnim = targetAnim;
         }
 
         if (!transitioned && targetAnim == MoveState.Walk){
-            if (TryCrossFade(MoveState.Run)){
+            if (TryCrossFade(currentAnim, MoveState.Run)){
                 transitioned = true;
                 resolvedAnim = MoveState.Run;
-            } else if (TryCrossFade(MoveState.Idle)){
+            } else if (TryCrossFade(currentAnim, MoveState.Idle)){
                 transitioned = true;
                 resolvedAnim = MoveState.Idle;
             }
         }
 
         if (!transitioned && targetAnim == MoveState.Run){
-            if (TryCrossFade(MoveState.Walk)){
+            if (TryCrossFade(currentAnim, MoveState.Walk)){
                 transitioned = true;
                 resolvedAnim = MoveState.Walk;
-            } else if (TryCrossFade(MoveState.Idle)){
+            } else if (TryCrossFade(currentAnim, MoveState.Idle)){
                 transitioned = true;
                 resolvedAnim = MoveState.Idle;
             }
         }
 
         if (!transitioned && targetAnim == MoveState.Jump){
-            if (TryCrossFade(MoveState.Fall)){
+            if (TryCrossFade(currentAnim, MoveState.Fall)){
                 transitioned = true;
                 resolvedAnim = MoveState.Fall;
-            } else if (TryCrossFade(MoveState.Idle)){
+            } else if (TryCrossFade(currentAnim, MoveState.Idle)){
                 transitioned = true;
                 resolvedAnim = MoveState.Idle;
             }
         }
 
         if (!transitioned && targetAnim == MoveState.Fall){
-            if (TryCrossFade(MoveState.Jump)){
+            if (TryCrossFade(currentAnim, MoveState.Jump)){
                 transitioned = true;
                 resolvedAnim = MoveState.Jump;
-            } else if (TryCrossFade(MoveState.Idle)){
+            } else if (TryCrossFade(currentAnim, MoveState.Idle)){
                 transitioned = true;
                 resolvedAnim = MoveState.Idle;
             }
         }
 
-        if (!transitioned && targetAnim != MoveState.Idle && TryCrossFade(MoveState.Idle)){
+        if (!transitioned && targetAnim != MoveState.Idle && TryCrossFade(currentAnim, MoveState.Idle)){
             transitioned = true;
             resolvedAnim = MoveState.Idle;
         }
@@ -234,30 +251,36 @@ public class CharController_Motor : MonoBehaviour {
             currentAnim = resolvedAnim;
     }
 
-    bool TryCrossFade(MoveState state){
-        int stateHash;
-        float blendTime;
+    bool IsWithinWaterSurfaceSupportRange(){
+        if (waterSurfaceSupportDepth <= 0f)
+            return false;
 
-        switch (state){
+        if (transform.position.y >= WaterHeight)
+            return false;
+
+        float depthFromSurface = WaterHeight - transform.position.y;
+        return depthFromSurface <= waterSurfaceSupportDepth;
+    }
+
+    bool TryCrossFade(MoveState fromState, MoveState toState){
+        int stateHash;
+        float blendTime = GetBlendTime(fromState, toState);
+
+        switch (toState){
             case MoveState.Idle:
                 stateHash = idleHash;
-                blendTime = idleBlend;
                 break;
             case MoveState.Walk:
                 stateHash = walkHash;
-                blendTime = walkBlend;
                 break;
             case MoveState.Run:
                 stateHash = runHash;
-                blendTime = runBlend;
                 break;
             case MoveState.Jump:
                 stateHash = jumpHash;
-                blendTime = jumpBlend;
                 break;
             default:
                 stateHash = fallHash;
-                blendTime = fallBlend;
                 break;
         }
 
@@ -268,5 +291,31 @@ public class CharController_Motor : MonoBehaviour {
             animator.CrossFade(stateHash, blendTime, 0);
 
         return true;
+    }
+
+    float GetBlendTime(MoveState fromState, MoveState toState){
+        if (transitionBlendOverrides != null){
+            for (int i = 0; i < transitionBlendOverrides.Count; i++){
+                TransitionBlendSetting setting = transitionBlendOverrides[i];
+                if (setting == null)
+                    continue;
+
+                if (setting.from == fromState && setting.to == toState)
+                    return Mathf.Max(0f, setting.blendTime);
+            }
+        }
+
+        switch (toState){
+            case MoveState.Idle:
+                return idleBlend;
+            case MoveState.Walk:
+                return walkBlend;
+            case MoveState.Run:
+                return runBlend;
+            case MoveState.Jump:
+                return jumpBlend;
+            default:
+                return fallBlend;
+        }
     }
 }
