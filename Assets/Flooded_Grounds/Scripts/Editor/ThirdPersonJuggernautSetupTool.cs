@@ -122,8 +122,16 @@ public static class ThirdPersonJuggernautSetupTool
 
         Undo.RecordObject(motor, "Assign camera/animator on motor");
         motor.cam = cameraObject;
+        motor.idleStateName = "Unreal Take 0";
+        motor.walkStateName = "Unreal Take 5";
+        motor.runStateName = "Unreal Take 3";
+        motor.jumpStateName = "Unreal Take 1";
+        motor.fallStateName = "Unreal Take 6";
         if (modelAnimator != null)
         {
+            Undo.RecordObject(modelAnimator, "Disable Animator Root Motion");
+            modelAnimator.applyRootMotion = false;
+            EditorUtility.SetDirty(modelAnimator);
             motor.animator = modelAnimator;
         }
         EditorUtility.SetDirty(motor);
