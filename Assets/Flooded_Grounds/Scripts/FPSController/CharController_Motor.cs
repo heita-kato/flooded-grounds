@@ -14,46 +14,53 @@ public class CharController_Motor : MonoBehaviour {
     }
 
     // --- 移動 ---
-    public float walkSpeed = 10.0f;
-    public float runSpeed = 20.0f;
-    public float sensitivity = 30.0f;
-    public float turnSpeed = 14.0f;
-    public float moveStartLockDuration = 0.1f;
-    public float acceleration = 1.0f;
-    public float deceleration = 18.0f;
-    public float WaterHeight = 15.5f;
-    public float waterSurfaceSupportDepth = 1.2f;
-    public float groundStickForce = 2.0f;
-    public float inputDeadZone = 0.2f;
+    [HideInInspector] public float walkSpeed = 2.0f;
+    [HideInInspector] public float runSpeed = 8.0f;
+    [HideInInspector] public float sensitivity = 30.0f;
+    [HideInInspector] public float turnSpeed = 7.0f;
+    [HideInInspector] public float moveStartLockDuration = 0.1f;
+    [HideInInspector] public float acceleration = 5.0f;
+    [HideInInspector] public float deceleration = 10.0f;
+    [HideInInspector] public float WaterHeight = 15.5f;
+    [HideInInspector] public float waterSurfaceSupportDepth = 1.2f;
+    [HideInInspector] public float groundStickForce = 2.0f;
+    [HideInInspector] public float inputDeadZone = 0.2f;
 
     // --- ジャンプ ---
-    public float jumpForce = 6.0f;
+    [HideInInspector] public float jumpForce = 6.0f;
 
     // --- アニメーション ---
-    public float walkAnimationSpeed = 0.5f;
-    public float runAnimationSpeed = 1.0f;
+    [HideInInspector] public float walkAnimationSpeed = 3.0f;
+    [HideInInspector] public float runAnimationSpeed = 1.0f;
     CharacterController character;
-    public GameObject cam;
-    public Animator animator;
+    [HideInInspector] public GameObject cam;
+    [HideInInspector] public Animator animator;
 
     // アニメーションクリップ名（Inspectorで変更可）
-    public string idleStateName   = "Unreal Take 0";
-    public string walkStateName   = "Unreal Take 5";
-    public string runStateName    = "Unreal Take 3";
-    public string jumpStateName   = "Unreal Take 1";
-    public string fallStateName   = "Unreal Take 6";
+    [HideInInspector] public string idleStateName   = "Unreal Take 0";
+    [HideInInspector] public string walkStateName   = "Unreal Take 5";
+    [HideInInspector] public string runStateName    = "Unreal Take 3";
+    [HideInInspector] public string jumpStateName   = "Unreal Take 1";
+    [HideInInspector] public string fallStateName   = "Unreal Take 6";
 
     // ブレンド時間
-    public float idleBlend  = 0.15f;
-    public float walkBlend  = 0.10f;
-    public float runBlend   = 0.10f;
-    public float jumpBlend  = 0.05f;
-    public float fallBlend  = 0.10f;
+    [HideInInspector] public float idleBlend  = 0.15f;
+    [HideInInspector] public float walkBlend  = 0.10f;
+    [HideInInspector] public float runBlend   = 0.10f;
+    [HideInInspector] public float jumpBlend  = 0.05f;
+    [HideInInspector] public float fallBlend  = 0.10f;
 
     // from -> to ごとのブレンド時間上書き（未設定時は各ステートの既定値を使用）
     public List<TransitionBlendSetting> transitionBlendOverrides = new List<TransitionBlendSetting>();
 
-    public bool webGLRightClickRotation = true;
+    [HideInInspector] public bool webGLRightClickRotation = true;
+
+    // --- ゴースト会話 ---
+    [HideInInspector] public string ghostObjectName = "Little_Ghost_ZOMbi (8)";
+    [HideInInspector] public float ghostInteractDistance = 3.0f;
+    [HideInInspector, Range(0f, 180f)] public float ghostFrontAngle = 60f;
+    [HideInInspector] public string ghostMessage = "...ここは flooded grounds。気をつけて進んで...";
+    [HideInInspector] public float ghostMessageDuration = 2.5f;
 
     // --- 内部状態 ---
     float moveFB, moveLR;
@@ -63,6 +70,9 @@ public class CharController_Motor : MonoBehaviour {
     float moveStartLockTimer;
     bool hadMoveInputLastFrame;
     bool isJumping;     // ジャンプ上昇中フラグ
+    float ghostMessageTimer;
+    Transform ghostTransform;
+    bool ghostLookupFailedLogged;
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -93,7 +103,7 @@ public class CharController_Motor : MonoBehaviour {
 
     void Update(){
         // --- 入力 ---
-        Vector2 rawInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        Vector2 rawInput = GetArrowKeyInput();
         if (rawInput.sqrMagnitude < inputDeadZone * inputDeadZone)
             rawInput = Vector2.zero;
 
@@ -164,6 +174,77 @@ public class CharController_Motor : MonoBehaviour {
 
         // --- アニメーション更新 ---
         UpdateAnimator(hasInput, isRunning, isGroundedLike);
+
+        // --- ゴースト会話入力 ---
+        if (IsGhostInteractPressed()){
+            TryShowGhostMessage();
+        }
+
+        if (ghostMessageTimer > 0f)
+            ghostMessageTimer = Mathf.Max(0f, ghostMessageTimer - Time.deltaTime);
+    }
+
+    Vector2 GetArrowKeyInput(){
+        float horizontal = 0f;
+        float vertical = 0f;
+
+        if (Input.GetKey(KeyCode.LeftArrow))
+            horizontal -= 1f;
+        if (Input.GetKey(KeyCode.RightArrow))
+            horizontal += 1f;
+        if (Input.GetKey(KeyCode.DownArrow))
+            vertical -= 1f;
+        if (Input.GetKey(KeyCode.UpArrow))
+            vertical += 1f;
+
+        return Vector2.ClampMagnitude(new Vector2(horizontal, vertical), 1f);
+    }
+
+    bool IsGhostInteractPressed(){
+        return Input.GetKeyDown(KeyCode.A);
+    }
+
+    void TryShowGhostMessage(){
+        Transform ghost = GetGhostTransform();
+        if (ghost == null)
+            return;
+
+        Vector3 toPlayer = transform.position - ghost.position;
+        toPlayer.y = 0f;
+        float distance = toPlayer.magnitude;
+        if (distance > ghostInteractDistance)
+            return;
+
+        if (distance <= 0.0001f)
+            return;
+
+        Vector3 ghostForward = ghost.forward;
+        ghostForward.y = 0f;
+        if (ghostForward.sqrMagnitude <= 0.0001f)
+            return;
+
+        float angle = Vector3.Angle(ghostForward.normalized, toPlayer.normalized);
+        if (angle > ghostFrontAngle)
+            return;
+
+        ghostMessageTimer = ghostMessageDuration;
+    }
+
+    Transform GetGhostTransform(){
+        if (ghostTransform != null)
+            return ghostTransform;
+
+        GameObject ghostObj = GameObject.Find(ghostObjectName);
+        if (ghostObj == null){
+            if (!ghostLookupFailedLogged){
+                Debug.LogWarning("Ghost object not found: " + ghostObjectName);
+                ghostLookupFailedLogged = true;
+            }
+            return null;
+        }
+
+        ghostTransform = ghostObj.transform;
+        return ghostTransform;
     }
 
     Vector3 GetCameraRelativeMove(Vector3 inputDirection){
@@ -317,5 +398,45 @@ public class CharController_Motor : MonoBehaviour {
             default:
                 return fallBlend;
         }
+    }
+
+    void OnGUI(){
+        // プレイヤー座標をデバッグ表示
+        Vector3 playerPos = transform.position;
+        string debugText = $"Player Position: X: {playerPos.x:F2}, Y: {playerPos.y:F2}, Z: {playerPos.z:F2}";
+        
+        GUI.color = Color.white;
+        GUI.Label(new Rect(10, 10, 400, 30), debugText);
+        
+        // 追加情報：速度、状態
+        string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Grounded: {character.isGrounded}";
+        GUI.Label(new Rect(10, 40, 400, 30), stateText);
+
+        if (ghostMessageTimer > 0f){
+            Transform ghost = GetGhostTransform();
+            Camera dialogueCamera = Camera.main;
+            if (dialogueCamera == null && cam != null)
+                dialogueCamera = cam.GetComponent<Camera>();
+
+            if (ghost != null && dialogueCamera != null){
+                Vector3 bubbleWorldPos = ghost.position + Vector3.up * 2.0f;
+                Vector3 screenPos = dialogueCamera.WorldToScreenPoint(bubbleWorldPos);
+
+                if (screenPos.z > 0f){
+                    float bubbleWidth = 380f;
+                    float bubbleHeight = 70f;
+                    float bubbleX = screenPos.x - (bubbleWidth * 0.5f);
+                    float bubbleY = Screen.height - screenPos.y - bubbleHeight - 20f;
+
+                    Rect bubbleRect = new Rect(bubbleX, bubbleY, bubbleWidth, bubbleHeight);
+                    GUI.color = new Color(1f, 1f, 1f, 0.95f);
+                    GUI.Box(bubbleRect, "");
+                    GUI.color = Color.white;
+                    GUI.Label(new Rect(bubbleX + 10f, bubbleY + 10f, bubbleWidth - 20f, bubbleHeight - 20f), ghostMessage);
+                }
+            }
+        }
+
+        GUI.color = Color.white;
     }
 }
