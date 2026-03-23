@@ -44,7 +44,7 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public string fallStateName   = "Unreal Take 6";
 
     // ブレンド時間
-    [HideInInspector] public float idleBlend  = 0.15f;
+    [HideInInspector] public float idleBlend  = 0.50f;
     [HideInInspector] public float walkBlend  = 0.10f;
     [HideInInspector] public float runBlend   = 0.10f;
     [HideInInspector] public float jumpBlend  = 0.05f;
@@ -62,6 +62,10 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public string ghostMessage = "...ここは flooded grounds。気をつけて進んで...";
     [HideInInspector] public float ghostMessageDuration = 2.5f;
 
+    // --- プレイヤー体力 ---
+    [Header("Player Status")]
+    public int maxHealth = 30;
+
     // --- 内部状態 ---
     float moveFB, moveLR;
     float gravity = -9.8f;
@@ -71,8 +75,10 @@ public class CharController_Motor : MonoBehaviour {
     bool hadMoveInputLastFrame;
     bool isJumping;     // ジャンプ上昇中フラグ
     float ghostMessageTimer;
+    float forcedIdleTimer;
     Transform ghostTransform;
     bool ghostLookupFailedLogged;
+    int currentHealth;
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -95,6 +101,8 @@ public class CharController_Motor : MonoBehaviour {
             webGLRightClickRotation = false;
             sensitivity *= 1.5f;
         }
+
+        currentHealth = Mathf.Max(1, maxHealth);
     }
 
     void CheckForWaterHeight(){
@@ -102,8 +110,16 @@ public class CharController_Motor : MonoBehaviour {
     }
 
     void Update(){
+        if (forcedIdleTimer > 0f)
+            forcedIdleTimer = Mathf.Max(0f, forcedIdleTimer - Time.deltaTime);
+
+        bool isForcedIdle = forcedIdleTimer > 0f;
+
         // --- 入力 ---
         Vector2 rawInput = GetArrowKeyInput();
+        if (isForcedIdle)
+            rawInput = Vector2.zero;
+
         if (rawInput.sqrMagnitude < inputDeadZone * inputDeadZone)
             rawInput = Vector2.zero;
 
@@ -158,7 +174,7 @@ public class CharController_Motor : MonoBehaviour {
                 isJumping = false;
             }
             // ジャンプ入力
-            if (Input.GetButtonDown("Jump")){
+            if (!isForcedIdle && Input.GetButtonDown("Jump")){
                 verticalVelocity = jumpForce;
                 isJumping = true;
             }
@@ -404,13 +420,19 @@ public class CharController_Motor : MonoBehaviour {
         // プレイヤー座標をデバッグ表示
         Vector3 playerPos = transform.position;
         string debugText = $"Player Position: X: {playerPos.x:F2}, Y: {playerPos.y:F2}, Z: {playerPos.z:F2}";
+
+        GUIStyle debugLabelStyle = new GUIStyle(GUI.skin.label);
+        debugLabelStyle.normal.textColor = Color.white;
         
         GUI.color = Color.white;
-        GUI.Label(new Rect(10, 10, 400, 30), debugText);
+        GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
         
         // 追加情報：速度、状態
         string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Grounded: {character.isGrounded}";
-        GUI.Label(new Rect(10, 40, 400, 30), stateText);
+        GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
+
+        string hpText = $"HP: {currentHealth}/{Mathf.Max(1, maxHealth)}";
+        GUI.Label(new Rect(10, 70, 400, 30), hpText, debugLabelStyle);
 
         if (ghostMessageTimer > 0f){
             Transform ghost = GetGhostTransform();
@@ -438,5 +460,15 @@ public class CharController_Motor : MonoBehaviour {
         }
 
         GUI.color = Color.white;
+    }
+
+    public int GetCurrentHealth(){
+        return currentHealth;
+    }
+
+    public void ApplySkeletonHit(int damage, float forceIdleSeconds){
+        int finalDamage = Mathf.Clamp(damage, 0, 9999);
+        currentHealth = Mathf.Max(0, currentHealth - finalDamage);
+        forcedIdleTimer = Mathf.Max(forcedIdleTimer, Mathf.Max(0f, forceIdleSeconds));
     }
 }

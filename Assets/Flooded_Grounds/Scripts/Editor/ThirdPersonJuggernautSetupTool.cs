@@ -1,4 +1,6 @@
+using System.Linq;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -8,6 +10,19 @@ public static class ThirdPersonJuggernautSetupTool
     private const string PlayerObjectName = "FpsController";
     private const string ScenePath = "Assets/Flooded_Grounds/Scenes/Scene_A.unity";
     private const string JuggernautPrefabPath = "Assets/IronSpear Content/Iron_Juggernaut/Prefabs/MidPoly.prefab";
+    private const string SkeletonModelPath = "Assets/DungeonCharacters/Skeletons_demo/models/DungeonSkeleton_demo.FBX";
+    private const string SkeletonIdleAnimPath = "Assets/DungeonCharacters/Skeletons_demo/animation/DS_onehand_idle_A.FBX";
+    private const string SkeletonWalkAnimPath = "Assets/DungeonCharacters/Skeletons_demo/animation/DS_onehand_walk.FBX";
+    private const string SkeletonAttackAnimPath = "Assets/DungeonCharacters/Skeletons_demo/animation/DS_onehand_attack_A.FBX";
+    private const string SkeletonControllerPath = "Assets/Flooded_Grounds/Content/Enemies/DungeonSkeleton.controller";
+
+    private static readonly Vector3 SkeletonSpawnCenter = new Vector3(556.1f, 17.35f, 218.17f);
+    private static readonly Vector3[] SkeletonOffsets =
+    {
+        new Vector3(0f, 0f, 0f),
+        new Vector3(2.2f, 0f, 1.4f),
+        new Vector3(-2.1f, 0f, -1.6f)
+    };
 
     [MenuItem("Tools/Flooded Grounds/Setup Iron Juggernaut Third Person")]
     public static void Setup()
@@ -146,10 +161,145 @@ public static class ThirdPersonJuggernautSetupTool
             EditorUtility.SetDirty(controller);
         }
 
+        SetupDungeonSkeletonEnemies(activeScene, player.transform);
+
         EditorSceneManager.MarkSceneDirty(activeScene);
         EditorSceneManager.SaveScene(activeScene);
         AssetDatabase.SaveAssets();
-        Debug.Log("Iron Juggernaut third-person setup completed and Scene_A saved.");
+        Debug.Log("Iron Juggernaut + Dungeon Skeleton setup completed and Scene_A saved.");
+    }
+
+    private static void SetupDungeonSkeletonEnemies(Scene scene, Transform player)
+    {
+        GameObject skeletonModel = AssetDatabase.LoadAssetAtPath<GameObject>(SkeletonModelPath);
+        if (skeletonModel == null)
+        {
+            Debug.LogError("Could not load skeleton model: " + SkeletonModelPath);
+            return;
+        }
+
+        AnimationClip idleClip = LoadClipByName(SkeletonIdleAnimPath, "DS_onehand_idle_A");
+        AnimationClip walkClip = LoadClipByName(SkeletonWalkAnimPath, "DS_onehand_walk");
+        AnimationClip attackClip = LoadClipByName(SkeletonAttackAnimPath, "DS_onehand_attack_A");
+        if (idleClip == null || walkClip == null || attackClip == null)
+        {
+            Debug.LogError("Could not load one or more skeleton animation clips.");
+            return;
+        }
+
+        EnsureFolder("Assets/Flooded_Grounds/Content");
+        EnsureFolder("Assets/Flooded_Grounds/Content/Enemies");
+
+        AnimatorController controller = EnsureSkeletonController(idleClip, walkClip, attackClip);
+        if (controller == null)
+        {
+            Debug.LogError("Could not create/load skeleton animator controller.");
+            return;
+        }
+
+        GameObject[] existing = Object.FindObjectsOfType<GameObject>();
+        foreach (GameObject go in existing)
+        {
+            if (go.name.StartsWith("DungeonSkeleton_demo_"))
+                Undo.DestroyObjectImmediate(go);
+        }
+
+        for (int i = 0; i < SkeletonOffsets.Length; i++)
+        {
+            GameObject enemy = (GameObject)PrefabUtility.InstantiatePrefab(skeletonModel, scene);
+            if (enemy == null)
+                continue;
+
+            Undo.RegisterCreatedObjectUndo(enemy, "Create dungeon skeleton enemy");
+            enemy.name = "DungeonSkeleton_demo_" + (i + 1);
+            enemy.transform.position = SkeletonSpawnCenter + SkeletonOffsets[i];
+            enemy.transform.rotation = Quaternion.identity;
+
+            Animator enemyAnimator = enemy.GetComponentInChildren<Animator>(true);
+            if (enemyAnimator == null)
+                enemyAnimator = enemy.GetComponent<Animator>();
+
+            if (enemyAnimator != null)
+            {
+                Undo.RecordObject(enemyAnimator, "Assign skeleton animator");
+                enemyAnimator.runtimeAnimatorController = controller;
+                enemyAnimator.applyRootMotion = false;
+                EditorUtility.SetDirty(enemyAnimator);
+            }
+
+            Collider col = enemy.GetComponent<Collider>();
+            if (col == null)
+                col = enemy.GetComponentInChildren<Collider>();
+
+            if (col == null)
+            {
+                CapsuleCollider capsule = Undo.AddComponent<CapsuleCollider>(enemy);
+                capsule.center = new Vector3(0f, 1.0f, 0f);
+                capsule.height = 2.0f;
+                capsule.radius = 0.35f;
+            }
+
+            DungeonSkeletonEnemyAI ai = enemy.GetComponent<DungeonSkeletonEnemyAI>();
+            if (ai == null)
+                ai = Undo.AddComponent<DungeonSkeletonEnemyAI>(enemy);
+
+            Undo.RecordObject(ai, "Configure skeleton enemy AI");
+            ai.player = player;
+            ai.animator = enemyAnimator;
+            ai.idleStateName = "DS_onehand_idle_A";
+            ai.walkStateName = "DS_onehand_walk";
+            ai.attackStateName = "DS_onehand_attack_A";
+            ai.playerForcedIdleSeconds = 0.2f;
+            EditorUtility.SetDirty(ai);
+        }
+    }
+
+    private static AnimationClip LoadClipByName(string assetPath, string clipName)
+    {
+        Object[] assets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        return assets.OfType<AnimationClip>().FirstOrDefault(c => c.name == clipName);
+    }
+
+    private static AnimatorController EnsureSkeletonController(AnimationClip idleClip, AnimationClip walkClip, AnimationClip attackClip)
+    {
+        AnimatorController controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(SkeletonControllerPath);
+        if (controller == null)
+            controller = AnimatorController.CreateAnimatorControllerAtPath(SkeletonControllerPath);
+
+        if (controller == null)
+            return null;
+
+        AnimatorStateMachine stateMachine = controller.layers[0].stateMachine;
+        stateMachine.states = new ChildAnimatorState[0];
+
+        AnimatorState idleState = stateMachine.AddState("DS_onehand_idle_A");
+        AnimatorState walkState = stateMachine.AddState("DS_onehand_walk");
+        AnimatorState attackState = stateMachine.AddState("DS_onehand_attack_A");
+
+        idleState.motion = idleClip;
+        walkState.motion = walkClip;
+        attackState.motion = attackClip;
+        stateMachine.defaultState = idleState;
+
+        EditorUtility.SetDirty(controller);
+        return controller;
+    }
+
+    private static void EnsureFolder(string path)
+    {
+        if (AssetDatabase.IsValidFolder(path))
+            return;
+
+        int slash = path.LastIndexOf('/');
+        if (slash <= 0)
+            return;
+
+        string parent = path.Substring(0, slash);
+        string folderName = path.Substring(slash + 1);
+        if (!AssetDatabase.IsValidFolder(parent))
+            EnsureFolder(parent);
+
+        AssetDatabase.CreateFolder(parent, folderName);
     }
 
     private static Scene EnsureTargetSceneOpen()
