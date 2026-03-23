@@ -75,6 +75,14 @@ public class CharController_Motor : MonoBehaviour {
     public int maxHealth = 30;
     public Font guiFont;
 
+    [Header("Invisibility (Dissolve)")]
+    public KeyCode invisibilityToggleKey = KeyCode.X;
+    public float dissolveTransitionSeconds = 0.45f;
+    [Range(0f, 1f)] public float visibleDissolveAmount = 0f;
+    [Range(0f, 1f)] public float invisibleDissolveAmount = 1f;
+    public Material dissolveFallbackMaterial;
+    public bool logInvisibilityIssues = true;
+
     // --- 内部状態 ---
     float moveFB, moveLR;
     float gravity = -9.8f;
@@ -91,6 +99,16 @@ public class CharController_Motor : MonoBehaviour {
     readonly List<DamagePopup> damagePopups = new List<DamagePopup>();
     Vector3 spawnPosition;
     Quaternion spawnRotation;
+    readonly List<Material> dissolveMaterials = new List<Material>();
+    readonly List<Material> runtimeDissolveInstances = new List<Material>();
+    Coroutine dissolveRoutine;
+    bool isInvisible;
+    float currentDissolveAmount;
+    const string DissolveAmountProperty = "_DissolveAmount";
+    const string MainTexProperty = "_MainTex";
+    const string BaseMapProperty = "_BaseMap";
+    const string ColorProperty = "_Color";
+    const string BaseColorProperty = "_BaseColor";
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -117,6 +135,9 @@ public class CharController_Motor : MonoBehaviour {
         currentHealth = Mathf.Max(1, maxHealth);
         spawnPosition = transform.position;
         spawnRotation = transform.rotation;
+
+        BuildDissolveMaterialsFromTemplate();
+        ApplyDissolveAmountInstant(visibleDissolveAmount);
     }
 
     void CheckForWaterHeight(){
@@ -124,6 +145,9 @@ public class CharController_Motor : MonoBehaviour {
     }
 
     void Update(){
+        if (Input.GetKeyDown(invisibilityToggleKey))
+            SetInvisibility(!isInvisible);
+
         if (forcedIdleTimer > 0f)
             forcedIdleTimer = Mathf.Max(0f, forcedIdleTimer - Time.deltaTime);
 
@@ -555,6 +579,138 @@ public class CharController_Motor : MonoBehaviour {
         popup.elapsed = 0f;
         popup.duration = 0.7f;
         damagePopups.Add(popup);
+    }
+
+    void OnDestroy(){
+        CleanupRuntimeDissolveInstances();
+    }
+
+    bool BuildDissolveMaterialsFromTemplate(){
+        CleanupRuntimeDissolveInstances();
+        dissolveMaterials.Clear();
+
+        if (dissolveFallbackMaterial == null){
+            if (logInvisibilityIssues)
+                Debug.LogWarning("[CharController_Motor] dissolveFallbackMaterial is not assigned.");
+            return false;
+        }
+
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++){
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+                continue;
+
+            Material[] originals = renderer.materials;
+            if (originals == null || originals.Length == 0)
+                continue;
+
+            Material[] replacements = new Material[originals.Length];
+            bool hasDissolveMaterial = false;
+
+            for (int j = 0; j < originals.Length; j++){
+                Material original = originals[j];
+                if (original == null){
+                    replacements[j] = null;
+                    continue;
+                }
+
+                Material replacement = new Material(dissolveFallbackMaterial);
+                CopyCommonMaterialProperties(original, replacement);
+                replacements[j] = replacement;
+                runtimeDissolveInstances.Add(replacement);
+
+                if (replacement.HasProperty(DissolveAmountProperty) && !dissolveMaterials.Contains(replacement)){
+                    dissolveMaterials.Add(replacement);
+                    hasDissolveMaterial = true;
+                }
+            }
+
+            if (!hasDissolveMaterial)
+                continue;
+
+            renderer.materials = replacements;
+        }
+
+        if (dissolveMaterials.Count == 0 && logInvisibilityIssues)
+            Debug.LogWarning("[CharController_Motor] The assigned dissolveFallbackMaterial does not expose _DissolveAmount.");
+
+        return dissolveMaterials.Count > 0;
+    }
+
+    void CopyCommonMaterialProperties(Material source, Material destination){
+        if (source == null || destination == null)
+            return;
+
+        if (source.HasProperty(MainTexProperty) && destination.HasProperty(MainTexProperty))
+            destination.SetTexture(MainTexProperty, source.GetTexture(MainTexProperty));
+        else if (source.HasProperty(BaseMapProperty) && destination.HasProperty(BaseMapProperty))
+            destination.SetTexture(BaseMapProperty, source.GetTexture(BaseMapProperty));
+
+        if (source.HasProperty(ColorProperty) && destination.HasProperty(ColorProperty))
+            destination.SetColor(ColorProperty, source.GetColor(ColorProperty));
+        else if (source.HasProperty(BaseColorProperty) && destination.HasProperty(BaseColorProperty))
+            destination.SetColor(BaseColorProperty, source.GetColor(BaseColorProperty));
+    }
+
+    void CleanupRuntimeDissolveInstances(){
+        for (int i = 0; i < runtimeDissolveInstances.Count; i++){
+            Material mat = runtimeDissolveInstances[i];
+            if (mat == null)
+                continue;
+
+            Destroy(mat);
+        }
+
+        runtimeDissolveInstances.Clear();
+    }
+
+    void SetInvisibility(bool makeInvisible){
+        if (dissolveMaterials.Count == 0 && !BuildDissolveMaterialsFromTemplate())
+            return;
+
+        isInvisible = makeInvisible;
+        float target = isInvisible ? invisibleDissolveAmount : visibleDissolveAmount;
+
+        if (dissolveRoutine != null)
+            StopCoroutine(dissolveRoutine);
+
+        dissolveRoutine = StartCoroutine(AnimateDissolve(target));
+    }
+
+    IEnumerator AnimateDissolve(float target){
+        float duration = Mathf.Max(0f, dissolveTransitionSeconds);
+        if (duration <= 0f){
+            ApplyDissolveAmountInstant(target);
+            dissolveRoutine = null;
+            yield break;
+        }
+
+        float start = currentDissolveAmount;
+        float elapsed = 0f;
+
+        while (elapsed < duration){
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float value = Mathf.Lerp(start, target, t);
+            ApplyDissolveAmountInstant(value);
+            yield return null;
+        }
+
+        ApplyDissolveAmountInstant(target);
+        dissolveRoutine = null;
+    }
+
+    void ApplyDissolveAmountInstant(float amount){
+        currentDissolveAmount = Mathf.Clamp01(amount);
+
+        for (int i = 0; i < dissolveMaterials.Count; i++){
+            Material mat = dissolveMaterials[i];
+            if (mat == null)
+                continue;
+
+            mat.SetFloat(DissolveAmountProperty, currentDissolveAmount);
+        }
     }
 
     void DrawDamagePopups(){
