@@ -67,8 +67,12 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public string ghostObjectName = "Little_Ghost_ZOMbi (8)";
     [HideInInspector] public float ghostInteractDistance = 3.0f;
     [HideInInspector, Range(0f, 180f)] public float ghostFrontAngle = 60f;
-    public string ghostMessage = "Hey, you there! You can become invisible by pressing the X key.";
-    [HideInInspector] public float ghostMessageDuration = 2.5f;
+    public string[] ghostMessages = new string[] {
+        "Hey, you there!",
+        "You can become invisible by pressing X key.",
+        "Press A key to continue conversations and stay sharp out there.",
+        "Good luck!"
+    };
 
     // --- プレイヤー体力 ---
     [Header("Player Status")]
@@ -91,9 +95,11 @@ public class CharController_Motor : MonoBehaviour {
     float moveStartLockTimer;
     bool hadMoveInputLastFrame;
     bool isJumping;     // ジャンプ上昇中フラグ
-    float ghostMessageTimer;
+    bool isGhostDialogueActive;
+    int ghostMessageIndex;
     float forcedIdleTimer;
     Transform ghostTransform;
+    ThirdPersonOrbitCamera orbitCamera;
     bool ghostLookupFailedLogged;
     int currentHealth;
     readonly List<DamagePopup> damagePopups = new List<DamagePopup>();
@@ -135,6 +141,8 @@ public class CharController_Motor : MonoBehaviour {
         currentHealth = Mathf.Max(1, maxHealth);
         spawnPosition = transform.position;
         spawnRotation = transform.rotation;
+        if (cam != null)
+            orbitCamera = cam.GetComponent<ThirdPersonOrbitCamera>();
 
         BuildDissolveMaterialsFromTemplate();
         ApplyDissolveAmountInstant(visibleDissolveAmount);
@@ -151,7 +159,7 @@ public class CharController_Motor : MonoBehaviour {
         if (forcedIdleTimer > 0f)
             forcedIdleTimer = Mathf.Max(0f, forcedIdleTimer - Time.deltaTime);
 
-        bool isForcedIdle = forcedIdleTimer > 0f;
+        bool isForcedIdle = forcedIdleTimer > 0f || isGhostDialogueActive;
 
         // --- 入力 ---
         Vector2 rawInput = GetArrowKeyInput();
@@ -231,11 +239,11 @@ public class CharController_Motor : MonoBehaviour {
 
         // --- ゴースト会話入力 ---
         if (IsGhostInteractPressed()){
-            TryShowGhostMessage();
+            if (isGhostDialogueActive)
+                AdvanceGhostDialogue();
+            else
+                TryStartGhostDialogue();
         }
-
-        if (ghostMessageTimer > 0f)
-            ghostMessageTimer = Mathf.Max(0f, ghostMessageTimer - Time.deltaTime);
     }
 
     Vector2 GetArrowKeyInput(){
@@ -258,7 +266,7 @@ public class CharController_Motor : MonoBehaviour {
         return Input.GetKeyDown(KeyCode.A);
     }
 
-    void TryShowGhostMessage(){
+    void TryStartGhostDialogue(){
         Transform ghost = GetGhostTransform();
         if (ghost == null)
             return;
@@ -281,7 +289,41 @@ public class CharController_Motor : MonoBehaviour {
         if (angle > ghostFrontAngle)
             return;
 
-        ghostMessageTimer = ghostMessageDuration;
+        StartGhostDialogue(ghost);
+    }
+
+    void StartGhostDialogue(Transform ghost){
+        isGhostDialogueActive = true;
+        ghostMessageIndex = 0;
+
+        if (orbitCamera == null && cam != null)
+            orbitCamera = cam.GetComponent<ThirdPersonOrbitCamera>();
+
+        if (orbitCamera != null)
+            orbitCamera.BeginGhostDialogue(ghost, transform);
+    }
+
+    void AdvanceGhostDialogue(){
+        if (!isGhostDialogueActive)
+            return;
+
+        int messageCount = ghostMessages != null ? ghostMessages.Length : 0;
+        if (messageCount <= 0){
+            EndGhostDialogue();
+            return;
+        }
+
+        ghostMessageIndex++;
+        if (ghostMessageIndex >= messageCount)
+            EndGhostDialogue();
+    }
+
+    void EndGhostDialogue(){
+        isGhostDialogueActive = false;
+        ghostMessageIndex = 0;
+
+        if (orbitCamera != null)
+            orbitCamera.EndGhostDialogue();
     }
 
     Transform GetGhostTransform(){
@@ -477,33 +519,37 @@ public class CharController_Motor : MonoBehaviour {
         DrawHealthGaugeTopRight();
         DrawDamagePopups();
 
-        if (ghostMessageTimer > 0f){
-            Transform ghost = GetGhostTransform();
-            Camera dialogueCamera = Camera.main;
-            if (dialogueCamera == null && cam != null)
-                dialogueCamera = cam.GetComponent<Camera>();
+        if (isGhostDialogueActive){
+            string message = GetCurrentGhostMessage();
+            if (!string.IsNullOrEmpty(message)){
+                float bubbleWidth = Mathf.Min(860f, Screen.width - 80f);
+                float bubbleHeight = 120f;
+                float bubbleX = (Screen.width - bubbleWidth) * 0.5f;
+                float bubbleY = Screen.height - bubbleHeight - 28f;
 
-            if (ghost != null && dialogueCamera != null){
-                Vector3 bubbleWorldPos = ghost.position + Vector3.up * 2.0f;
-                Vector3 screenPos = dialogueCamera.WorldToScreenPoint(bubbleWorldPos);
+                Rect bubbleRect = new Rect(bubbleX, bubbleY, bubbleWidth, bubbleHeight);
+                GUI.color = new Color(0f, 0f, 0f, 0.72f);
+                GUI.Box(bubbleRect, "");
 
-                if (screenPos.z > 0f){
-                    float bubbleWidth = 380f;
-                    float bubbleHeight = 70f;
-                    float bubbleX = screenPos.x - (bubbleWidth * 0.5f);
-                    float bubbleY = Screen.height - screenPos.y - bubbleHeight - 20f;
+                GUIStyle ghostMessageStyle = new GUIStyle(GUI.skin.label);
+                ghostMessageStyle.alignment = TextAnchor.MiddleLeft;
+                ghostMessageStyle.wordWrap = true;
+                ghostMessageStyle.fontSize = 22;
+                ghostMessageStyle.normal.textColor = Color.white;
+                if (guiFont != null)
+                    ghostMessageStyle.font = guiFont;
 
-                    Rect bubbleRect = new Rect(bubbleX, bubbleY, bubbleWidth, bubbleHeight);
-                    GUI.color = new Color(1f, 1f, 1f, 0.95f);
-                    GUI.Box(bubbleRect, "");
-                    GUI.color = Color.white;
-                    GUIStyle ghostMessageStyle = new GUIStyle(GUI.skin.label);
-                    ghostMessageStyle.alignment = TextAnchor.MiddleLeft;
-                    ghostMessageStyle.normal.textColor = Color.white;
-                    if (guiFont != null)
-                        ghostMessageStyle.font = guiFont;
-                    GUI.Label(new Rect(bubbleX + 10f, bubbleY + 10f, bubbleWidth - 20f, bubbleHeight - 20f), ghostMessage, ghostMessageStyle);
-                }
+                GUI.color = Color.white;
+                GUI.Label(new Rect(bubbleX + 18f, bubbleY + 14f, bubbleWidth - 36f, bubbleHeight - 44f), message, ghostMessageStyle);
+
+                GUIStyle continueStyle = new GUIStyle(GUI.skin.label);
+                continueStyle.alignment = TextAnchor.LowerRight;
+                continueStyle.fontSize = 16;
+                continueStyle.normal.textColor = new Color(1f, 1f, 1f, 0.9f);
+                if (guiFont != null)
+                    continueStyle.font = guiFont;
+
+                GUI.Label(new Rect(bubbleX + 18f, bubbleY + bubbleHeight - 30f, bubbleWidth - 36f, 20f), "A : Next", continueStyle);
             }
         }
 
@@ -516,6 +562,14 @@ public class CharController_Motor : MonoBehaviour {
 
     public bool IsInvisible(){
         return isInvisible;
+    }
+
+    string GetCurrentGhostMessage(){
+        if (ghostMessages == null || ghostMessages.Length == 0)
+            return string.Empty;
+
+        int index = Mathf.Clamp(ghostMessageIndex, 0, ghostMessages.Length - 1);
+        return ghostMessages[index];
     }
 
     public void ApplySkeletonHit(int damage, float forceIdleSeconds){
@@ -567,7 +621,6 @@ public class CharController_Motor : MonoBehaviour {
         GUI.color = Color.white;
         GUIStyle hpStyle = new GUIStyle(GUI.skin.label);
         hpStyle.alignment = TextAnchor.MiddleCenter;
-        hpStyle.fontStyle = FontStyle.Bold;
         hpStyle.normal.textColor = Color.white;
         if (guiFont != null)
             hpStyle.font = guiFont;
