@@ -4,6 +4,14 @@ using UnityEngine;
 
 public class CharController_Motor : MonoBehaviour {
 
+    class DamagePopup {
+        public int damage;
+        public Vector2 startPos;
+        public Vector2 velocity;
+        public float elapsed;
+        public float duration;
+    }
+
     public enum MoveState { Idle, Walk, Run, Jump, Fall }
 
     [System.Serializable]
@@ -59,12 +67,13 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public string ghostObjectName = "Little_Ghost_ZOMbi (8)";
     [HideInInspector] public float ghostInteractDistance = 3.0f;
     [HideInInspector, Range(0f, 180f)] public float ghostFrontAngle = 60f;
-    [HideInInspector] public string ghostMessage = "...ここは flooded grounds。気をつけて進んで...";
+    public string ghostMessage = "Hey, you there! You can become invisible by pressing the X key.";
     [HideInInspector] public float ghostMessageDuration = 2.5f;
 
     // --- プレイヤー体力 ---
     [Header("Player Status")]
     public int maxHealth = 30;
+    public Font guiFont;
 
     // --- 内部状態 ---
     float moveFB, moveLR;
@@ -79,6 +88,9 @@ public class CharController_Motor : MonoBehaviour {
     Transform ghostTransform;
     bool ghostLookupFailedLogged;
     int currentHealth;
+    readonly List<DamagePopup> damagePopups = new List<DamagePopup>();
+    Vector3 spawnPosition;
+    Quaternion spawnRotation;
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -103,6 +115,8 @@ public class CharController_Motor : MonoBehaviour {
         }
 
         currentHealth = Mathf.Max(1, maxHealth);
+        spawnPosition = transform.position;
+        spawnRotation = transform.rotation;
     }
 
     void CheckForWaterHeight(){
@@ -423,6 +437,8 @@ public class CharController_Motor : MonoBehaviour {
 
         GUIStyle debugLabelStyle = new GUIStyle(GUI.skin.label);
         debugLabelStyle.normal.textColor = Color.white;
+        if (guiFont != null)
+            debugLabelStyle.font = guiFont;
         
         GUI.color = Color.white;
         GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
@@ -433,6 +449,9 @@ public class CharController_Motor : MonoBehaviour {
 
         string hpText = $"HP: {currentHealth}/{Mathf.Max(1, maxHealth)}";
         GUI.Label(new Rect(10, 70, 400, 30), hpText, debugLabelStyle);
+
+        DrawHealthGaugeTopRight();
+        DrawDamagePopups();
 
         if (ghostMessageTimer > 0f){
             Transform ghost = GetGhostTransform();
@@ -454,7 +473,12 @@ public class CharController_Motor : MonoBehaviour {
                     GUI.color = new Color(1f, 1f, 1f, 0.95f);
                     GUI.Box(bubbleRect, "");
                     GUI.color = Color.white;
-                    GUI.Label(new Rect(bubbleX + 10f, bubbleY + 10f, bubbleWidth - 20f, bubbleHeight - 20f), ghostMessage);
+                    GUIStyle ghostMessageStyle = new GUIStyle(GUI.skin.label);
+                    ghostMessageStyle.alignment = TextAnchor.MiddleLeft;
+                    ghostMessageStyle.normal.textColor = Color.white;
+                    if (guiFont != null)
+                        ghostMessageStyle.font = guiFont;
+                    GUI.Label(new Rect(bubbleX + 10f, bubbleY + 10f, bubbleWidth - 20f, bubbleHeight - 20f), ghostMessage, ghostMessageStyle);
                 }
             }
         }
@@ -470,5 +494,107 @@ public class CharController_Motor : MonoBehaviour {
         int finalDamage = Mathf.Clamp(damage, 0, 9999);
         currentHealth = Mathf.Max(0, currentHealth - finalDamage);
         forcedIdleTimer = Mathf.Max(forcedIdleTimer, Mathf.Max(0f, forceIdleSeconds));
+
+        if (finalDamage > 0)
+            AddDamagePopup(finalDamage);
+
+        if (currentHealth <= 0)
+            RespawnPlayer();
+    }
+
+    void RespawnPlayer(){
+        if (character != null)
+            character.enabled = false;
+
+        transform.position = spawnPosition;
+        transform.rotation = spawnRotation;
+
+        if (character != null)
+            character.enabled = true;
+
+        currentHealth = Mathf.Max(1, maxHealth);
+        verticalVelocity = 0f;
+        horizontalSpeed = 0f;
+        forcedIdleTimer = 0f;
+        damagePopups.Clear();
+    }
+
+    void DrawHealthGaugeTopRight(){
+        float gaugeWidth = 250f;
+        float gaugeHeight = 24f;
+        float margin = 20f;
+
+        float x = Screen.width - gaugeWidth - margin;
+        float y = margin;
+        Rect gaugeRect = new Rect(x, y, gaugeWidth, gaugeHeight);
+        Rect fillRect = new Rect(x + 2f, y + 2f, (gaugeWidth - 4f) * Mathf.Clamp01((float)currentHealth / Mathf.Max(1, maxHealth)), gaugeHeight - 4f);
+
+        Color prev = GUI.color;
+        GUI.color = new Color(0.08f, 0.08f, 0.08f, 0.9f);
+        GUI.DrawTexture(gaugeRect, Texture2D.whiteTexture);
+
+        GUI.color = new Color(0.15f, 0.85f, 0.2f, 0.95f);
+        GUI.DrawTexture(fillRect, Texture2D.whiteTexture);
+
+        GUI.color = Color.white;
+        GUIStyle hpStyle = new GUIStyle(GUI.skin.label);
+        hpStyle.alignment = TextAnchor.MiddleCenter;
+        hpStyle.fontStyle = FontStyle.Bold;
+        hpStyle.normal.textColor = Color.white;
+        if (guiFont != null)
+            hpStyle.font = guiFont;
+        GUI.Label(gaugeRect, $"HP {currentHealth}/{Mathf.Max(1, maxHealth)}", hpStyle);
+        GUI.color = prev;
+    }
+
+    void AddDamagePopup(int damage){
+        DamagePopup popup = new DamagePopup();
+        popup.damage = damage;
+        popup.startPos = new Vector2(Screen.width * 0.5f, Screen.height * 0.6f);
+        popup.velocity = new Vector2(Random.Range(-40f, 40f), Random.Range(-130f, -90f));
+        popup.elapsed = 0f;
+        popup.duration = 0.7f;
+        damagePopups.Add(popup);
+    }
+
+    void DrawDamagePopups(){
+        if (damagePopups.Count == 0)
+            return;
+
+        GUIStyle damageStyle = new GUIStyle(GUI.skin.label);
+        damageStyle.alignment = TextAnchor.MiddleCenter;
+        damageStyle.fontSize = 30;
+        damageStyle.fontStyle = FontStyle.Bold;
+        if (guiFont != null)
+            damageStyle.font = guiFont;
+
+        Matrix4x4 prevMatrix = GUI.matrix;
+
+        for (int i = damagePopups.Count - 1; i >= 0; i--){
+            DamagePopup popup = damagePopups[i];
+            popup.elapsed += Time.deltaTime;
+            float t = popup.duration <= 0f ? 1f : Mathf.Clamp01(popup.elapsed / popup.duration);
+
+            if (t >= 1f){
+                damagePopups.RemoveAt(i);
+                continue;
+            }
+
+            Vector2 pos = popup.startPos + popup.velocity * t;
+            float popScale = 1f + Mathf.Sin(Mathf.Clamp01(t / 0.25f) * Mathf.PI) * 0.55f;
+            float alpha = 1f - t;
+
+            damageStyle.normal.textColor = new Color(1f, 0.15f, 0.15f, alpha);
+
+            Rect textRect = new Rect(pos.x - 70f, pos.y - 25f, 140f, 50f);
+            Vector2 pivot = new Vector2(textRect.x + textRect.width * 0.5f, textRect.y + textRect.height * 0.5f);
+
+            GUI.matrix = Matrix4x4.TRS(pivot, Quaternion.identity, Vector3.one) *
+                         Matrix4x4.Scale(new Vector3(popScale, popScale, 1f)) *
+                         Matrix4x4.TRS(-pivot, Quaternion.identity, Vector3.one);
+
+            GUI.Label(textRect, $"-{popup.damage}", damageStyle);
+            GUI.matrix = prevMatrix;
+        }
     }
 }
