@@ -514,6 +514,10 @@ public class CharController_Motor : MonoBehaviour {
         return currentHealth;
     }
 
+    public bool IsInvisible(){
+        return isInvisible;
+    }
+
     public void ApplySkeletonHit(int damage, float forceIdleSeconds){
         int finalDamage = Mathf.Clamp(damage, 0, 9999);
         currentHealth = Mathf.Max(0, currentHealth - finalDamage);

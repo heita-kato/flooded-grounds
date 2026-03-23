@@ -107,6 +107,17 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         ResolvePlayerReference();
         ResolveOverlapWithNearbySkeletons();
 
+        if (IsPlayerInvisible())
+        {
+            if (currentState == EnemyState.Attack || currentState == EnemyState.Chase || currentState == EnemyState.Cooldown)
+            {
+                BeginIdle();
+            }
+
+            UpdateWanderBehavior();
+            return;
+        }
+
         if (currentState == EnemyState.Attack)
         {
             UpdateAttack();
@@ -213,6 +224,11 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             return;
         }
 
+        if (IsPlayerInvisible())
+        {
+            return;
+        }
+
         float distance = GetPlayerDistance();
         if (distance > chaseStopRange + 0.35f)
         {
@@ -228,6 +244,11 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             Vector3 effectPosition = player.position + Vector3.up * hitEffectYOffset;
             Instantiate(hitEffectPrefab, effectPosition, Quaternion.identity);
         }
+    }
+
+    private bool IsPlayerInvisible()
+    {
+        return playerMotor != null && playerMotor.IsInvisible();
     }
 
     private void UpdateWanderBehavior()
