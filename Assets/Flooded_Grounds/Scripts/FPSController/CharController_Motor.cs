@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class CharController_Motor : MonoBehaviour {
 
@@ -87,6 +88,19 @@ public class CharController_Motor : MonoBehaviour {
     public Material dissolveFallbackMaterial;
     public bool logInvisibilityIssues = true;
 
+    [Header("HUD")]
+    public float invisIconFadeSpeed = 7.5f;
+    public float radarSize = 140f;
+    [Range(0.2f, 1f)] public float radarDetectionRangeScale = 0.65f;
+    public Vector2 radarWorldMinXZ = new Vector2(-120f, -120f);
+    public Vector2 radarWorldMaxXZ = new Vector2(120f, 120f);
+    public float radarEnemyRefreshSeconds = 0.75f;
+
+    [Header("HUD Status VFX")]
+    public GameObject hpGaugeSideVfxPrefab;
+    public Vector2 hpGaugeSideVfxOffset = new Vector2(52f, 12f);
+    public Vector3 hpGaugeSideVfxScale = new Vector3(0.42f, 0.42f, 0.42f);
+
     // --- 内部状態 ---
     float moveFB, moveLR;
     float gravity = -9.8f;
@@ -109,12 +123,40 @@ public class CharController_Motor : MonoBehaviour {
     readonly List<Material> runtimeDissolveInstances = new List<Material>();
     Coroutine dissolveRoutine;
     bool isInvisible;
+    float invisibilityIconBlend;
     float currentDissolveAmount;
     const string DissolveAmountProperty = "_DissolveAmount";
     const string MainTexProperty = "_MainTex";
     const string BaseMapProperty = "_BaseMap";
     const string ColorProperty = "_Color";
     const string BaseColorProperty = "_BaseColor";
+    Texture2D hpGaugeBackgroundTex;
+    Texture2D hpGaugeFillTex;
+    Texture2D hpGaugeFrameTex;
+    Texture2D hpGaugeFillGlowTex;
+    Texture2D hpGaugeFrameGlowTex;
+    Texture2D invisIconOnTex;
+    Texture2D invisIconOffTex;
+    Texture2D invisIconPanelTex;
+    Texture2D radarEnemyIconTex;
+    Texture2D radarGhostIconTex;
+    Texture2D radarPlayerNormalIconTex;
+    Texture2D radarPlayerIconTex;
+    int hpGaugeTextureWidth = -1;
+    int hpGaugeTextureHeight = -1;
+    float hpGaugePulseTimer;
+    const float HpGaugePulseDuration = 0.45f;
+    const string RadarEnemyIconResourcePath = "Icon/daemon-skull";
+    const string RadarGhostIconResourcePath = "Icon/fairy";
+    const string RadarPlayerNormalIconResourcePath = "Icon/visored-helm-normal";
+    const string RadarPlayerIconResourcePath = "Icon/visored-helm";
+    const string HpGaugeSideVfxPrefabPath = "Assets/VisualX_Studio/App_UI_Icon_animation_FREE/VFX/Prefabs (color)/06 equalizer_01.prefab";
+    readonly List<Transform> radarEnemyTargets = new List<Transform>();
+    float radarEnemyRefreshTimer;
+    Canvas hudOverlayCanvas;
+    bool createdHudOverlayCanvas;
+    GameObject hpGaugeSideVfxInstance;
+    RectTransform hpGaugeSideVfxRect;
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -146,6 +188,11 @@ public class CharController_Motor : MonoBehaviour {
 
         BuildDissolveMaterialsFromTemplate();
         ApplyDissolveAmountInstant(visibleDissolveAmount);
+        invisibilityIconBlend = isInvisible ? 1f : 0f;
+        EnsureRadarIconsLoaded();
+        TryAssignHudVfxPrefabsInEditor();
+        EnsureHudOverlayCanvas();
+        EnsureHpGaugeSideVfx();
     }
 
     void CheckForWaterHeight(){
@@ -155,6 +202,12 @@ public class CharController_Motor : MonoBehaviour {
     void Update(){
         if (Input.GetKeyDown(invisibilityToggleKey))
             SetInvisibility(!isInvisible);
+
+        float iconTarget = isInvisible ? 1f : 0f;
+        invisibilityIconBlend = Mathf.MoveTowards(invisibilityIconBlend, iconTarget, Mathf.Max(0.01f, invisIconFadeSpeed) * Time.deltaTime);
+
+        if (hpGaugePulseTimer > 0f)
+            hpGaugePulseTimer = Mathf.Max(0f, hpGaugePulseTimer - Time.deltaTime);
 
         if (forcedIdleTimer > 0f)
             forcedIdleTimer = Mathf.Max(0f, forcedIdleTimer - Time.deltaTime);
@@ -244,6 +297,8 @@ public class CharController_Motor : MonoBehaviour {
             else
                 TryStartGhostDialogue();
         }
+
+        UpdateHpGaugeSideVfxPosition();
     }
 
     Vector2 GetArrowKeyInput(){
@@ -503,20 +558,20 @@ public class CharController_Motor : MonoBehaviour {
 
         GUIStyle debugLabelStyle = new GUIStyle(GUI.skin.label);
         debugLabelStyle.normal.textColor = Color.white;
-        if (guiFont != null)
-            debugLabelStyle.font = guiFont;
         
         GUI.color = Color.white;
         GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
         
         // 追加情報：速度、状態
-        string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Grounded: {character.isGrounded}";
+        string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: ground";
         GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
 
-        string hpText = $"HP: {currentHealth}/{Mathf.Max(1, maxHealth)}";
-        GUI.Label(new Rect(10, 70, 400, 30), hpText, debugLabelStyle);
+        string testText = $"Sound: Background music";
+        GUI.Label(new Rect(10, 70, 400, 30), testText, debugLabelStyle);
 
-        DrawHealthGaugeTopRight();
+        DrawRadarTopRight();
+        DrawHealthGaugeBottomRight();
+        DrawInvisibilityStatusIconBottomLeft();
         DrawDamagePopups();
 
         if (isGhostDialogueActive){
@@ -577,8 +632,10 @@ public class CharController_Motor : MonoBehaviour {
         currentHealth = Mathf.Max(0, currentHealth - finalDamage);
         forcedIdleTimer = Mathf.Max(forcedIdleTimer, Mathf.Max(0f, forceIdleSeconds));
 
-        if (finalDamage > 0)
+        if (finalDamage > 0){
+            TriggerHpGaugePulse();
             AddDamagePopup(finalDamage);
+        }
 
         if (currentHealth <= 0)
             RespawnPlayer();
@@ -601,31 +658,500 @@ public class CharController_Motor : MonoBehaviour {
         damagePopups.Clear();
     }
 
-    void DrawHealthGaugeTopRight(){
+    void DrawHealthGaugeBottomRight(){
+        Rect gaugeRect = GetHealthGaugeRect();
+        Rect fillRect = new Rect(
+            gaugeRect.x + 2f,
+            gaugeRect.y + 2f,
+            (gaugeRect.width - 4f) * Mathf.Clamp01((float)currentHealth / Mathf.Max(1, maxHealth)),
+            gaugeRect.height - 4f);
+
+        EnsureHudTextures(Mathf.RoundToInt(gaugeRect.width), Mathf.RoundToInt(gaugeRect.height));
+
+        Color prev = GUI.color;
+        GUI.color = Color.white;
+        GUI.DrawTexture(gaugeRect, hpGaugeBackgroundTex);
+        GUI.DrawTexture(fillRect, hpGaugeFillTex);
+        GUI.DrawTexture(gaugeRect, hpGaugeFrameTex);
+
+        float pulse = GetHpGaugePulseIntensity();
+        if (pulse > 0.001f){
+            GUI.color = new Color(1f, 1f, 1f, pulse);
+            GUI.DrawTexture(fillRect, hpGaugeFillGlowTex);
+            GUI.DrawTexture(gaugeRect, hpGaugeFrameGlowTex);
+        }
+        GUI.color = prev;
+    }
+
+    Rect GetHealthGaugeRect(){
         float gaugeWidth = 250f;
         float gaugeHeight = 24f;
         float margin = 20f;
 
-        float x = Screen.width - gaugeWidth - margin;
-        float y = margin;
-        Rect gaugeRect = new Rect(x, y, gaugeWidth, gaugeHeight);
-        Rect fillRect = new Rect(x + 2f, y + 2f, (gaugeWidth - 4f) * Mathf.Clamp01((float)currentHealth / Mathf.Max(1, maxHealth)), gaugeHeight - 4f);
+        float x = (Screen.width - gaugeWidth) * 0.5f;
+        float y = Screen.height - gaugeHeight - margin;
+        return new Rect(x, y, gaugeWidth, gaugeHeight);
+    }
 
-        Color prev = GUI.color;
-        GUI.color = new Color(0.08f, 0.08f, 0.08f, 0.9f);
-        GUI.DrawTexture(gaugeRect, Texture2D.whiteTexture);
+    bool EnsureHudOverlayCanvas(){
+        if (hudOverlayCanvas != null)
+            return true;
 
-        GUI.color = new Color(0.15f, 0.85f, 0.2f, 0.95f);
-        GUI.DrawTexture(fillRect, Texture2D.whiteTexture);
+        GameObject canvasObj = new GameObject("HUDOverlayCanvas_Runtime");
+        hudOverlayCanvas = canvasObj.AddComponent<Canvas>();
+        hudOverlayCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        hudOverlayCanvas.sortingOrder = 4000;
+        canvasObj.AddComponent<CanvasScaler>();
+        canvasObj.AddComponent<GraphicRaycaster>();
+        createdHudOverlayCanvas = true;
+        return true;
+    }
+
+    void EnsureHpGaugeSideVfx(){
+        if (hpGaugeSideVfxPrefab == null)
+            return;
+
+        if (!EnsureHudOverlayCanvas())
+            return;
+
+        if (hpGaugeSideVfxInstance != null)
+            return;
+
+        hpGaugeSideVfxInstance = Instantiate(hpGaugeSideVfxPrefab, hudOverlayCanvas.transform, false);
+        hpGaugeSideVfxRect = hpGaugeSideVfxInstance.GetComponent<RectTransform>();
+        if (hpGaugeSideVfxRect != null)
+            hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
+    }
+
+    void UpdateHpGaugeSideVfxPosition(){
+        EnsureHpGaugeSideVfx();
+
+        if (hpGaugeSideVfxRect == null)
+            return;
+
+        Rect gaugeRect = GetHealthGaugeRect();
+        float targetGuiX = gaugeRect.xMax + hpGaugeSideVfxOffset.x;
+        float targetGuiY = gaugeRect.y + hpGaugeSideVfxOffset.y;
+        float targetScreenY = Screen.height - targetGuiY;
+
+        hpGaugeSideVfxRect.anchorMin = new Vector2(0.5f, 0.5f);
+        hpGaugeSideVfxRect.anchorMax = new Vector2(0.5f, 0.5f);
+        hpGaugeSideVfxRect.pivot = new Vector2(0.5f, 0.5f);
+        hpGaugeSideVfxRect.anchoredPosition = new Vector2(
+            targetGuiX - Screen.width * 0.5f,
+            targetScreenY - Screen.height * 0.5f);
+        hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
+    }
+
+    void DestroyHpGaugeSideVfx(){
+        if (hpGaugeSideVfxInstance != null)
+            Destroy(hpGaugeSideVfxInstance);
+
+        hpGaugeSideVfxInstance = null;
+        hpGaugeSideVfxRect = null;
+    }
+
+    void TryAssignHudVfxPrefabsInEditor(){
+        if (hpGaugeSideVfxPrefab != null)
+            return;
+
+#if UNITY_EDITOR
+        hpGaugeSideVfxPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(HpGaugeSideVfxPrefabPath);
+#endif
+    }
+
+    void DrawInvisibilityStatusIconBottomLeft(){
+        float margin = 20f;
+        float panelSize = 68f;
+        float iconSize = 42f;
+        float gaugeWidth = 250f;
+        float gaugeHeight = 24f;
+
+        EnsureHudTextures(250, 24);
+
+        float gaugeX = (Screen.width - gaugeWidth) * 0.5f;
+        float gaugeY = Screen.height - gaugeHeight - margin;
+        float panelX = gaugeX - panelSize - 14f;
+        float panelY = gaugeY + (gaugeHeight - panelSize) * 0.5f;
+
+        Rect panelRect = new Rect(panelX, panelY, panelSize, panelSize);
+        Rect iconRect = new Rect(
+            panelRect.x + (panelRect.width - iconSize) * 0.5f,
+            panelRect.y + 8f,
+            iconSize,
+            iconSize);
 
         GUI.color = Color.white;
-        GUIStyle hpStyle = new GUIStyle(GUI.skin.label);
-        hpStyle.alignment = TextAnchor.MiddleCenter;
-        hpStyle.normal.textColor = Color.white;
-        if (guiFont != null)
-            hpStyle.font = guiFont;
-        GUI.Label(gaugeRect, $"HP {currentHealth}/{Mathf.Max(1, maxHealth)}", hpStyle);
-        GUI.color = prev;
+        GUI.DrawTexture(panelRect, invisIconPanelTex);
+
+        Color offColor = new Color(1f, 1f, 1f, 1f - invisibilityIconBlend);
+        Color onColor = new Color(1f, 1f, 1f, invisibilityIconBlend);
+        GUI.color = offColor;
+        GUI.DrawTexture(iconRect, invisIconOffTex);
+        GUI.color = onColor;
+        GUI.DrawTexture(iconRect, invisIconOnTex);
+    }
+
+    void DrawRadarTopRight(){
+        EnsureRadarIconsLoaded();
+
+        float size = Mathf.Max(90f, radarSize);
+        float margin = 20f;
+        Rect radarRect = new Rect(Screen.width - size - margin, margin, size, size);
+
+        GUI.color = new Color(0.04f, 0.07f, 0.10f, 0.86f);
+        GUI.DrawTexture(radarRect, Texture2D.whiteTexture);
+
+        GUI.color = new Color(1f, 1f, 1f, 0.08f);
+        GUI.DrawTexture(new Rect(radarRect.x + radarRect.width * 0.5f - 1f, radarRect.y + 6f, 2f, radarRect.height - 12f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(radarRect.x + 6f, radarRect.y + radarRect.height * 0.5f - 1f, radarRect.width - 12f, 2f), Texture2D.whiteTexture);
+
+        GUI.color = new Color(0.75f, 0.88f, 1f, 0.26f);
+        GUI.DrawTexture(new Rect(radarRect.x, radarRect.y, radarRect.width, 2f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(radarRect.x, radarRect.yMax - 2f, radarRect.width, 2f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(radarRect.x, radarRect.y, 2f, radarRect.height), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(radarRect.xMax - 2f, radarRect.y, 2f, radarRect.height), Texture2D.whiteTexture);
+
+        Vector2 playerRadarPos = new Vector2(radarRect.x + radarRect.width * 0.5f, radarRect.y + radarRect.height * 0.5f);
+
+        RefreshRadarEnemyTargetsIfNeeded();
+
+        Transform ghost = GetGhostTransform();
+        if (ghost != null){
+            Vector2 ghostRadarPos;
+            if (TryGetRadarRelativePosition(ghost.position, transform.position, radarRect, out ghostRadarPos))
+                DrawRadarMarker(ghostRadarPos, 20f, radarGhostIconTex, new Color(0.92f, 0.82f, 1f, 0.95f));
+        }
+
+        for (int i = radarEnemyTargets.Count - 1; i >= 0; i--){
+            Transform enemy = radarEnemyTargets[i];
+            if (enemy == null){
+                radarEnemyTargets.RemoveAt(i);
+                continue;
+            }
+
+            Vector2 enemyRadarPos;
+            if (TryGetRadarRelativePosition(enemy.position, transform.position, radarRect, out enemyRadarPos))
+                DrawRadarMarker(enemyRadarPos, 19f, radarEnemyIconTex, new Color(1f, 0.35f, 0.35f, 0.95f));
+        }
+
+        Texture2D playerRadarIcon = isInvisible ? radarPlayerIconTex : radarPlayerNormalIconTex;
+        DrawRadarMarker(playerRadarPos, 22f, playerRadarIcon, new Color(0.25f, 0.95f, 0.70f, 1f));
+
+        Vector3 fwd = transform.forward;
+        Vector2 dir = new Vector2(fwd.x, fwd.z).normalized;
+        float lineLen = 14f;
+        Rect dirRect = new Rect(playerRadarPos.x, playerRadarPos.y, dir.x * lineLen, -dir.y * lineLen);
+        DrawRadarLine(dirRect, new Color(0.85f, 1f, 0.92f, 0.95f));
+
+    }
+
+    bool TryGetRadarRelativePosition(Vector3 worldPos, Vector3 playerPos, Rect radarRect, out Vector2 radarPos){
+        float minX = Mathf.Min(radarWorldMinXZ.x, radarWorldMaxXZ.x);
+        float maxX = Mathf.Max(radarWorldMinXZ.x, radarWorldMaxXZ.x);
+        float minZ = Mathf.Min(radarWorldMinXZ.y, radarWorldMaxXZ.y);
+        float maxZ = Mathf.Max(radarWorldMinXZ.y, radarWorldMaxXZ.y);
+
+        float detectionScale = Mathf.Clamp(radarDetectionRangeScale, 0.2f, 1f);
+        float rangeX = Mathf.Abs(maxX - minX) * 0.5f * detectionScale;
+        float rangeZ = Mathf.Abs(maxZ - minZ) * 0.5f * detectionScale;
+
+        if (rangeX <= 0.0001f || rangeZ <= 0.0001f){
+            radarPos = Vector2.zero;
+            return false;
+        }
+
+        float offsetX = Mathf.Clamp((worldPos.x - playerPos.x) / rangeX, -1f, 1f);
+        float offsetZ = Mathf.Clamp((worldPos.z - playerPos.z) / rangeZ, -1f, 1f);
+
+        float nx = (offsetX + 1f) * 0.5f;
+        float nz = (offsetZ + 1f) * 0.5f;
+        radarPos = new Vector2(
+            Mathf.Lerp(radarRect.x + 8f, radarRect.xMax - 8f, Mathf.Clamp01(nx)),
+            Mathf.Lerp(radarRect.yMax - 8f, radarRect.y + 8f, Mathf.Clamp01(nz)));
+        return true;
+    }
+
+    void DrawRadarDot(Vector2 position, float size, Color color){
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(position.x - size * 0.5f, position.y - size * 0.5f, size, size), Texture2D.whiteTexture);
+    }
+
+    void DrawRadarMarker(Vector2 position, float size, Texture2D iconTexture, Color fallbackColor){
+        GUI.color = Color.white;
+
+        if (iconTexture != null){
+            GUI.DrawTexture(new Rect(position.x - size * 0.5f, position.y - size * 0.5f, size, size), iconTexture);
+            return;
+        }
+
+        DrawRadarDot(position, size * 0.55f, fallbackColor);
+    }
+
+    void EnsureRadarIconsLoaded(){
+        if (radarEnemyIconTex == null)
+            radarEnemyIconTex = Resources.Load<Texture2D>(RadarEnemyIconResourcePath);
+
+        if (radarGhostIconTex == null)
+            radarGhostIconTex = Resources.Load<Texture2D>(RadarGhostIconResourcePath);
+
+        if (radarPlayerNormalIconTex == null)
+            radarPlayerNormalIconTex = Resources.Load<Texture2D>(RadarPlayerNormalIconResourcePath);
+
+        if (radarPlayerIconTex == null)
+            radarPlayerIconTex = Resources.Load<Texture2D>(RadarPlayerIconResourcePath);
+    }
+
+    void RefreshRadarEnemyTargetsIfNeeded(){
+        radarEnemyRefreshTimer -= Time.deltaTime;
+        if (radarEnemyRefreshTimer > 0f)
+            return;
+
+        radarEnemyRefreshTimer = Mathf.Max(0.1f, radarEnemyRefreshSeconds);
+        radarEnemyTargets.Clear();
+
+        DungeonSkeletonEnemyAI[] enemies = FindObjectsOfType<DungeonSkeletonEnemyAI>();
+        for (int i = 0; i < enemies.Length; i++){
+            DungeonSkeletonEnemyAI enemy = enemies[i];
+            if (enemy == null)
+                continue;
+
+            radarEnemyTargets.Add(enemy.transform);
+        }
+    }
+
+    void DrawRadarLine(Rect vectorRect, Color color){
+        Vector2 start = new Vector2(vectorRect.x, vectorRect.y);
+        Vector2 end = new Vector2(vectorRect.x + vectorRect.width, vectorRect.y + vectorRect.height);
+        Vector2 diff = end - start;
+        float len = diff.magnitude;
+        if (len <= 0.001f)
+            return;
+
+        Vector2 dir = diff / len;
+        Vector2 perp = new Vector2(-dir.y, dir.x);
+
+        float thickness = 2f;
+        float headLength = Mathf.Clamp(len * 0.38f, 6f, 12f);
+        float headWidth = headLength * 0.9f;
+
+        Vector2 shaftEnd = end - dir * (headLength * 0.55f);
+        Vector2 leftWing = end - dir * headLength + perp * (headWidth * 0.5f);
+        Vector2 rightWing = end - dir * headLength - perp * (headWidth * 0.5f);
+
+        DrawGuiLine(start, shaftEnd, color, thickness);
+        DrawGuiLine(end, leftWing, color, thickness);
+        DrawGuiLine(end, rightWing, color, thickness);
+    }
+
+    void DrawGuiLine(Vector2 start, Vector2 end, Color color, float thickness){
+        Vector2 diff = end - start;
+        float len = diff.magnitude;
+        if (len <= 0.001f)
+            return;
+
+        float angle = Mathf.Atan2(diff.y, diff.x) * Mathf.Rad2Deg;
+        Matrix4x4 prevMatrix = GUI.matrix;
+        Color prevColor = GUI.color;
+
+        GUI.color = color;
+        GUI.matrix = Matrix4x4.TRS(start, Quaternion.Euler(0f, 0f, angle), Vector3.one);
+        GUI.DrawTexture(new Rect(0f, -thickness * 0.5f, len, thickness), Texture2D.whiteTexture);
+
+        GUI.matrix = prevMatrix;
+        GUI.color = prevColor;
+    }
+
+    void EnsureHudTextures(int gaugeWidth, int gaugeHeight){
+        if (hpGaugeBackgroundTex == null || hpGaugeTextureWidth != gaugeWidth || hpGaugeTextureHeight != gaugeHeight){
+            hpGaugeBackgroundTex = CreateRoundedRectTexture(gaugeWidth, gaugeHeight, new Color(0.08f, 0.11f, 0.13f, 0.94f), new Color(0.03f, 0.05f, 0.06f, 0.94f), 10f, 0f, false);
+            hpGaugeFillTex = CreateRoundedRectTexture(gaugeWidth, gaugeHeight, new Color(0.10f, 0.45f, 0.30f, 0.98f), new Color(0.02f, 0.25f, 0.18f, 0.98f), 8f, 0f, false);
+            hpGaugeFrameTex = CreateRoundedRectTexture(gaugeWidth, gaugeHeight, new Color(0.75f, 0.90f, 1f, 0.20f), new Color(0.55f, 0.75f, 0.95f, 0.20f), 10f, 1.2f, true);
+            hpGaugeFillGlowTex = CreateRoundedRectTexture(gaugeWidth, gaugeHeight, new Color(0.90f, 1f, 0.65f, 0.95f), new Color(0.62f, 0.95f, 0.35f, 0.95f), 8f, 0f, false);
+            hpGaugeFrameGlowTex = CreateRoundedRectTexture(gaugeWidth, gaugeHeight, new Color(1f, 0.42f, 0.18f, 0.95f), new Color(0.86f, 0.18f, 0.12f, 0.95f), 10f, 2f, true);
+            hpGaugeTextureWidth = gaugeWidth;
+            hpGaugeTextureHeight = gaugeHeight;
+        }
+
+        if (invisIconPanelTex == null)
+            invisIconPanelTex = CreateRoundedRectTexture(68, 68, new Color(0.05f, 0.07f, 0.10f, 0.86f), new Color(0.02f, 0.03f, 0.05f, 0.86f), 12f, 0f, false);
+
+        if (invisIconOnTex == null)
+            invisIconOnTex = CreateCircleTexture(42, new Color(0.25f, 0.95f, 1f, 0.96f), new Color(0.05f, 0.45f, 0.75f, 0.96f), new Color(0.85f, 1f, 1f, 0.95f), 2f, new Color(1f, 1f, 1f, 0.95f), 0.034f);
+
+        if (invisIconOffTex == null)
+            invisIconOffTex = CreateCircleTexture(42, new Color(0.55f, 0.55f, 0.55f, 0.92f), new Color(0.28f, 0.28f, 0.28f, 0.92f), new Color(0.92f, 0.92f, 0.92f, 0.60f), 2f, new Color(0.34f, 0.34f, 0.34f, 0.92f), 0.034f);
+    }
+
+    Texture2D CreateRoundedRectTexture(int width, int height, Color topColor, Color bottomColor, float radius, float borderThickness, bool drawBorder){
+        Texture2D tex = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        float maxY = height - 1f;
+        float innerRadius = Mathf.Max(0f, radius - borderThickness);
+
+        for (int y = 0; y < height; y++){
+            float v = maxY <= 0f ? 0f : y / maxY;
+            Color gradColor = Color.Lerp(bottomColor, topColor, v);
+
+            for (int x = 0; x < width; x++){
+                bool inOuter = IsInsideRoundedRect(x, y, width, height, radius);
+                if (!inOuter){
+                    tex.SetPixel(x, y, Color.clear);
+                    continue;
+                }
+
+                if (drawBorder){
+                    bool inInner = IsInsideRoundedRectInset(x, y, width, height, innerRadius, borderThickness);
+                    if (inInner){
+                        tex.SetPixel(x, y, Color.clear);
+                        continue;
+                    }
+                }
+
+                tex.SetPixel(x, y, gradColor);
+            }
+        }
+
+        tex.Apply();
+        return tex;
+    }
+
+    bool IsInsideRoundedRectInset(int px, int py, int width, int height, float radius, float inset){
+        float minX = Mathf.Max(0f, inset);
+        float minY = Mathf.Max(0f, inset);
+        float maxX = (width - 1f) - Mathf.Max(0f, inset);
+        float maxY = (height - 1f) - Mathf.Max(0f, inset);
+
+        if (minX > maxX || minY > maxY)
+            return false;
+
+        float x = px;
+        float y = py;
+        if (x < minX || x > maxX || y < minY || y > maxY)
+            return false;
+
+        float effectiveWidth = (maxX - minX) + 1f;
+        float effectiveHeight = (maxY - minY) + 1f;
+        float r = Mathf.Min(radius, Mathf.Min(effectiveWidth, effectiveHeight) * 0.5f);
+
+        if (r <= 0f)
+            return true;
+
+        if (x >= minX + r && x <= maxX - r)
+            return true;
+        if (y >= minY + r && y <= maxY - r)
+            return true;
+
+        float cx = x < minX + r ? minX + r : maxX - r;
+        float cy = y < minY + r ? minY + r : maxY - r;
+        float dx = x - cx;
+        float dy = y - cy;
+        return dx * dx + dy * dy <= r * r;
+    }
+
+    bool IsInsideRoundedRect(int px, int py, int width, int height, float radius){
+        if (radius <= 0f)
+            return true;
+
+        float r = Mathf.Min(radius, Mathf.Min(width, height) * 0.5f);
+        float x = px;
+        float y = py;
+        float maxX = width - 1f;
+        float maxY = height - 1f;
+
+        if (x >= r && x <= maxX - r)
+            return true;
+        if (y >= r && y <= maxY - r)
+            return true;
+
+        float cx = x < r ? r : maxX - r;
+        float cy = y < r ? r : maxY - r;
+        float dx = x - cx;
+        float dy = y - cy;
+        return dx * dx + dy * dy <= r * r;
+    }
+
+    Texture2D CreateCircleTexture(int size, Color topColor, Color bottomColor, Color rimColor, float rimThickness, Color stickFigureColor, float stickFigureLineThickness){
+        Texture2D tex = new Texture2D(size, size, TextureFormat.ARGB32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        float center = (size - 1) * 0.5f;
+        float radius = center;
+        float innerRadius = Mathf.Max(0f, radius - rimThickness);
+
+        for (int y = 0; y < size; y++){
+            float v = (size <= 1) ? 0f : (float)y / (size - 1);
+            Color grad = Color.Lerp(bottomColor, topColor, v);
+
+            for (int x = 0; x < size; x++){
+                float dx = x - center;
+                float dy = y - center;
+                float dist = Mathf.Sqrt(dx * dx + dy * dy);
+
+                if (dist > radius){
+                    tex.SetPixel(x, y, Color.clear);
+                    continue;
+                }
+
+                Color finalColor = (dist >= innerRadius) ? rimColor : grad;
+
+                if (DrawInvisibilityStickFigurePixel(x, y, size, center, stickFigureLineThickness))
+                    finalColor = stickFigureColor;
+
+                tex.SetPixel(x, y, finalColor);
+            }
+        }
+
+        tex.Apply();
+        return tex;
+    }
+
+    bool DrawInvisibilityStickFigurePixel(int x, int y, int size, float center, float bodyLineThickness){
+        float nx = (x - center) / Mathf.Max(1f, size - 1f);
+        float ny = (y - center) / Mathf.Max(1f, size - 1f);
+
+        float headCenterX = 0f;
+        float headCenterY = 0.18f;
+        float headRadius = 0.11f;
+        float bodyThickness = 0.034f;
+        float limbThickness = Mathf.Max(0.01f, bodyLineThickness);
+
+        bool isHead = IsPointInCircle(nx, ny, headCenterX, headCenterY, headRadius);
+        if (isHead)
+            return true;
+
+        bool isBody = IsPointNearLine(nx, ny, 0f, 0.06f, 0f, -0.17f, bodyThickness);
+        bool isLeftArm = IsPointNearLine(nx, ny, 0f, -0.01f, -0.14f, -0.09f, limbThickness);
+        bool isRightArm = IsPointNearLine(nx, ny, 0f, -0.01f, 0.14f, -0.09f, limbThickness);
+        bool isLeftLeg = IsPointNearLine(nx, ny, 0f, -0.17f, -0.13f, -0.32f, limbThickness);
+        bool isRightLeg = IsPointNearLine(nx, ny, 0f, -0.17f, 0.13f, -0.32f, limbThickness);
+
+        return isBody || isLeftArm || isRightArm || isLeftLeg || isRightLeg;
+    }
+
+    bool IsPointInCircle(float px, float py, float cx, float cy, float radius){
+        float dx = px - cx;
+        float dy = py - cy;
+        return dx * dx + dy * dy <= radius * radius;
+    }
+
+    bool IsPointNearLine(float px, float py, float x1, float y1, float x2, float y2, float thickness){
+        float vx = x2 - x1;
+        float vy = y2 - y1;
+        float wx = px - x1;
+        float wy = py - y1;
+
+        float lenSq = vx * vx + vy * vy;
+        if (lenSq <= 0.000001f)
+            return IsPointInCircle(px, py, x1, y1, thickness * 0.5f);
+
+        float t = Mathf.Clamp01((wx * vx + wy * vy) / lenSq);
+        float cx = x1 + vx * t;
+        float cy = y1 + vy * t;
+        float dx = px - cx;
+        float dy = py - cy;
+        return dx * dx + dy * dy <= thickness * thickness;
     }
 
     void AddDamagePopup(int damage){
@@ -638,8 +1164,44 @@ public class CharController_Motor : MonoBehaviour {
         damagePopups.Add(popup);
     }
 
+    void TriggerHpGaugePulse(){
+        hpGaugePulseTimer = HpGaugePulseDuration;
+    }
+
+    float GetHpGaugePulseIntensity(){
+        if (hpGaugePulseTimer <= 0f)
+            return 0f;
+
+        float t = 1f - Mathf.Clamp01(hpGaugePulseTimer / HpGaugePulseDuration);
+        float fadeIn = Mathf.Clamp01(t / 0.28f);
+        float fadeOut = 1f - Mathf.Clamp01((t - 0.28f) / 0.72f);
+        float intensity = Mathf.Min(fadeIn, fadeOut);
+        return intensity * 0.9f;
+    }
+
     void OnDestroy(){
+        DestroyHpGaugeSideVfx();
+        if (createdHudOverlayCanvas && hudOverlayCanvas != null)
+            Destroy(hudOverlayCanvas.gameObject);
+
         CleanupRuntimeDissolveInstances();
+
+        if (hpGaugeBackgroundTex != null)
+            Destroy(hpGaugeBackgroundTex);
+        if (hpGaugeFillTex != null)
+            Destroy(hpGaugeFillTex);
+        if (hpGaugeFrameTex != null)
+            Destroy(hpGaugeFrameTex);
+        if (hpGaugeFillGlowTex != null)
+            Destroy(hpGaugeFillGlowTex);
+        if (hpGaugeFrameGlowTex != null)
+            Destroy(hpGaugeFrameGlowTex);
+        if (invisIconOnTex != null)
+            Destroy(invisIconOnTex);
+        if (invisIconOffTex != null)
+            Destroy(invisIconOffTex);
+        if (invisIconPanelTex != null)
+            Destroy(invisIconPanelTex);
     }
 
     bool BuildDissolveMaterialsFromTemplate(){

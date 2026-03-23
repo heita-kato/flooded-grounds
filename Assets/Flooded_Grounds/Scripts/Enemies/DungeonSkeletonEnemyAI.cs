@@ -49,6 +49,13 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     [Header("Debug")]
     public bool logAnimationIssues = true;
 
+    [Header("Lost Target Mark")]
+    public float lostTargetMarkSeconds = 1.35f;
+    public float lostTargetMarkHeight = 2.2f;
+    public float lostTargetMarkFloatPixels = 22f;
+    public int lostTargetMarkFontSize = 38;
+    public Font lostTargetMarkFont;
+
     private EnemyState currentState = EnemyState.Idle;
     private Vector3 spawnOrigin;
     private Vector3 wanderTarget;
@@ -66,6 +73,9 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     private bool loggedMissingIdle;
     private bool loggedMissingWalk;
     private bool loggedMissingAttack;
+    private bool wasPlayerInvisibleLastFrame;
+    private float lostTargetMarkTimer;
+    private Camera cachedRenderCamera;
 
     private CharController_Motor playerMotor;
 
@@ -99,15 +109,29 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
 
     private void Update()
     {
+        ResolvePlayerReference();
+        bool playerInvisible = IsPlayerInvisible();
+
+        if (lostTargetMarkTimer > 0f)
+        {
+            lostTargetMarkTimer = Mathf.Max(0f, lostTargetMarkTimer - Time.deltaTime);
+        }
+
         if (attackCooldownTimer > 0f)
         {
             attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - Time.deltaTime);
         }
 
-        ResolvePlayerReference();
         ResolveOverlapWithNearbySkeletons();
 
-        if (IsPlayerInvisible())
+        if (playerInvisible && !wasPlayerInvisibleLastFrame && (currentState == EnemyState.Chase || currentState == EnemyState.Attack || currentState == EnemyState.Cooldown))
+        {
+            lostTargetMarkTimer = Mathf.Max(0.05f, lostTargetMarkSeconds);
+        }
+
+        wasPlayerInvisibleLastFrame = playerInvisible;
+
+        if (playerInvisible)
         {
             if (currentState == EnemyState.Attack || currentState == EnemyState.Chase || currentState == EnemyState.Cooldown)
             {
@@ -134,6 +158,85 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         }
 
         UpdateWanderBehavior();
+    }
+
+    private void OnGUI()
+    {
+        if (lostTargetMarkTimer <= 0f)
+        {
+            return;
+        }
+
+        Camera cam = ResolveRenderCamera();
+        if (cam == null)
+        {
+            return;
+        }
+
+        Vector3 worldPos = transform.position + Vector3.up * lostTargetMarkHeight;
+        Vector3 screenPos = cam.WorldToScreenPoint(worldPos);
+        if (screenPos.z <= 0f)
+        {
+            return;
+        }
+
+        float duration = Mathf.Max(0.05f, lostTargetMarkSeconds);
+        float progress = 1f - Mathf.Clamp01(lostTargetMarkTimer / duration);
+        float yFloat = Mathf.Lerp(0f, lostTargetMarkFloatPixels, progress);
+        float alpha = progress >= 0.7f ? Mathf.Lerp(1f, 0f, (progress - 0.7f) / 0.3f) : 1f;
+
+        float size = Mathf.Max(16f, lostTargetMarkFontSize + 10f);
+        float drawX = screenPos.x - size * 0.5f;
+        float drawY = (Screen.height - screenPos.y) - size * 0.5f - yFloat;
+        Rect rect = new Rect(drawX, drawY, size, size);
+
+        GUIStyle style = new GUIStyle(GUI.skin.label);
+        style.alignment = TextAnchor.MiddleCenter;
+        style.fontSize = Mathf.Max(12, lostTargetMarkFontSize);
+        style.fontStyle = FontStyle.Bold;
+        if (lostTargetMarkFont != null)
+        {
+            style.font = lostTargetMarkFont;
+        }
+
+        Color previous = GUI.color;
+        GUI.color = new Color(0f, 0f, 0f, 0.5f);
+        GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), "?", style);
+        GUI.color = Color.black;
+        GUI.Label(rect, "?", style);
+        GUI.color = previous;
+    }
+
+    private Camera ResolveRenderCamera()
+    {
+        if (cachedRenderCamera != null)
+        {
+            return cachedRenderCamera;
+        }
+
+        if (Camera.main != null)
+        {
+            cachedRenderCamera = Camera.main;
+            return cachedRenderCamera;
+        }
+
+        if (playerMotor != null && playerMotor.cam != null)
+        {
+            Camera playerCam = playerMotor.cam.GetComponent<Camera>();
+            if (playerCam != null)
+            {
+                cachedRenderCamera = playerCam;
+                return cachedRenderCamera;
+            }
+        }
+
+        Camera anyCam = FindObjectOfType<Camera>();
+        if (anyCam != null)
+        {
+            cachedRenderCamera = anyCam;
+        }
+
+        return cachedRenderCamera;
     }
 
     private void ResolvePlayerReference()
