@@ -14,6 +14,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     [Header("References")]
     public Transform player;
     public Animator animator;
+    public GameObject hitEffectPrefab;
 
     [Header("Animation States")]
     public string idleStateName = "DS_onehand_idle_A";
@@ -43,6 +44,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     public float attackHitDelay = 0.35f;
     public float attackAnimationDuration = 0.8f;
     public float playerForcedIdleSeconds = 0.2f;
+    public float hitEffectYOffset = 1.0f;
 
     [Header("Debug")]
     public bool logAnimationIssues = true;
@@ -219,6 +221,13 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
 
         int damage = Random.Range(3, 8);
         playerMotor.ApplySkeletonHit(damage, playerForcedIdleSeconds);
+
+        // Instantiate hit effect at player position
+        if (hitEffectPrefab != null)
+        {
+            Vector3 effectPosition = player.position + Vector3.up * hitEffectYOffset;
+            Instantiate(hitEffectPrefab, effectPosition, Quaternion.identity);
+        }
     }
 
     private void UpdateWanderBehavior()
