@@ -3,6 +3,7 @@ using System.Collections;
 
 public class FPSDisplay : MonoBehaviour
 {
+	[SerializeField] private bool enableFPSDisplay = false;
 	float deltaTime = 0.0f;
 	
 	void Update()
@@ -12,6 +13,9 @@ public class FPSDisplay : MonoBehaviour
 	
 	void OnGUI()
 	{
+		if (!enableFPSDisplay)
+			return;
+
 		int w = Screen.width, h = Screen.height;
 		
 		GUIStyle style = new GUIStyle();

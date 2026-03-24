@@ -101,6 +101,9 @@ public class CharController_Motor : MonoBehaviour {
     public Vector2 hpGaugeSideVfxOffset = new Vector2(52f, 12f);
     public Vector3 hpGaugeSideVfxScale = new Vector3(0.42f, 0.42f, 0.42f);
 
+    [Header("Debug")]
+    public bool showDebugInfo = true;
+
     // --- 内部状態 ---
     float moveFB, moveLR;
     float gravity = -9.8f;
@@ -553,21 +556,24 @@ public class CharController_Motor : MonoBehaviour {
 
     void OnGUI(){
         // プレイヤー座標をデバッグ表示
-        Vector3 playerPos = transform.position;
-        string debugText = $"Player Position: X: {playerPos.x:F2}, Y: {playerPos.y:F2}, Z: {playerPos.z:F2}";
+        if (showDebugInfo)
+        {
+            Vector3 playerPos = transform.position;
+            string debugText = $"Player Position: X: {playerPos.x:F2}, Y: {playerPos.y:F2}, Z: {playerPos.z:F2}";
 
-        GUIStyle debugLabelStyle = new GUIStyle(GUI.skin.label);
-        debugLabelStyle.normal.textColor = Color.white;
-        
-        GUI.color = Color.white;
-        GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
-        
-        // 追加情報：速度、状態
-        string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: ground";
-        GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
+            GUIStyle debugLabelStyle = new GUIStyle(GUI.skin.label);
+            debugLabelStyle.normal.textColor = Color.white;
+            
+            GUI.color = Color.white;
+            GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
+            
+            // 追加情報：速度、状態
+            string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: ground";
+            GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
 
-        string testText = $"Sound: Background music";
-        GUI.Label(new Rect(10, 70, 400, 30), testText, debugLabelStyle);
+            string testText = $"Sound: Background music";
+            GUI.Label(new Rect(10, 70, 400, 30), testText, debugLabelStyle);
+        }
 
         DrawRadarTopRight();
         DrawHealthGaugeBottomRight();
