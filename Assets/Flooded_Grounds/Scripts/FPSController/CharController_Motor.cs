@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 public class CharController_Motor : MonoBehaviour {
 
@@ -648,20 +649,23 @@ public class CharController_Motor : MonoBehaviour {
     }
 
     void RespawnPlayer(){
-        if (character != null)
-            character.enabled = false;
+        StartCoroutine(FadeAndTransitionToOverScene());
+    }
 
-        transform.position = spawnPosition;
-        transform.rotation = spawnRotation;
+    private IEnumerator FadeAndTransitionToOverScene(){
+        float fadeDuration = 0.6f;
+        float fadeAlpha = 0f;
+        float elapsed = 0f;
 
-        if (character != null)
-            character.enabled = true;
+        while (elapsed < fadeDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            fadeAlpha = Mathf.Clamp01(elapsed / fadeDuration);
+            yield return null;
+        }
 
-        currentHealth = Mathf.Max(1, maxHealth);
-        verticalVelocity = 0f;
-        horizontalSpeed = 0f;
-        forcedIdleTimer = 0f;
-        damagePopups.Clear();
+        fadeAlpha = 1f;
+        SceneManager.LoadScene("OverScene");
     }
 
     void DrawHealthGaugeBottomRight(){
