@@ -583,7 +583,7 @@ public class CharController_Motor : MonoBehaviour {
                 float bubbleY = Screen.height - bubbleHeight - 28f;
 
                 Rect bubbleRect = new Rect(bubbleX, bubbleY, bubbleWidth, bubbleHeight);
-                GUI.color = new Color(0f, 0f, 0f, 0.72f);
+                GUI.color = new Color(0f, 0f, 0f, 0f);
                 GUI.Box(bubbleRect, "");
 
                 GUIStyle ghostMessageStyle = new GUIStyle(GUI.skin.label);
