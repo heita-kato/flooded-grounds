@@ -4,6 +4,8 @@ using UnityEngine.SceneManagement;
 
 public class BgmCrossfadeController : MonoBehaviour
 {
+    private const string TitleSceneNameToken = "title";
+
     [Header("BGM")]
     [SerializeField] private string mainBgmResourcePath = "Music/main-bgm";
     [SerializeField] private string battleBgmResourcePath = "Music/battle-bgm";
@@ -58,9 +60,7 @@ public class BgmCrossfadeController : MonoBehaviour
 
         LoadClips();
         TryFindPlayer();
-
-        if (mainClip != null)
-            StartImmediate(mainClip);
+        ApplySceneAudioMode(SceneManager.GetActiveScene());
     }
 
     private void OnDestroy()
@@ -70,6 +70,9 @@ public class BgmCrossfadeController : MonoBehaviour
 
     private void Update()
     {
+        if (IsTitleSceneActive())
+            return;
+
         if (mainClip == null || battleClip == null)
             return;
 
@@ -105,6 +108,10 @@ public class BgmCrossfadeController : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        ApplySceneAudioMode(scene);
+        if (IsTitleScene(scene))
+            return;
+
         TryFindPlayer();
         RefreshEnemyTargets();
 
@@ -119,6 +126,49 @@ public class BgmCrossfadeController : MonoBehaviour
             isBattleMode = true;
         else if (activeSource.clip == mainClip)
             isBattleMode = false;
+    }
+
+    private void ApplySceneAudioMode(Scene scene)
+    {
+        if (IsTitleScene(scene))
+        {
+            isBattleMode = false;
+            isFading = false;
+
+            if (sourceA != null)
+            {
+                sourceA.Stop();
+                sourceA.clip = null;
+                sourceA.volume = 0f;
+            }
+
+            if (sourceB != null)
+            {
+                sourceB.Stop();
+                sourceB.clip = null;
+                sourceB.volume = 0f;
+            }
+
+            activeSource = sourceA != null ? sourceA : sourceB;
+            return;
+        }
+
+        if (mainClip != null && (activeSource == null || activeSource.clip == null || !activeSource.isPlaying))
+            StartImmediate(mainClip);
+    }
+
+    private bool IsTitleSceneActive()
+    {
+        return IsTitleScene(SceneManager.GetActiveScene());
+    }
+
+    private bool IsTitleScene(Scene scene)
+    {
+        string sceneName = scene.name;
+        if (!string.IsNullOrEmpty(sceneName) && sceneName.ToLowerInvariant().Contains(TitleSceneNameToken))
+            return true;
+
+        return FindObjectOfType<TitleSceneController>() != null;
     }
 
     private void ConfigureSource(AudioSource src)
