@@ -171,6 +171,9 @@ public class CharController_Motor : MonoBehaviour {
     AudioClip fstepRunWater;
     AudioClip currentFootstepClip;
     Coroutine footstepFadeRoutine;
+    AudioSource movementOneShotAudioSource;
+    AudioClip jumpStartClip;
+    AudioClip jumpEndClip;
     [HideInInspector] public float footstepVolume = 0.85f;
     [HideInInspector] public float footstepFadeInSeconds = 0.08f;
     [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
@@ -212,6 +215,7 @@ public class CharController_Motor : MonoBehaviour {
         EnsureHudOverlayCanvas();
         EnsureHpGaugeSideVfx();
         InitializeFootstepAudio();
+        InitializeMovementOneShotAudio();
     }
 
     void InitializeFootstepAudio(){
@@ -234,6 +238,21 @@ public class CharController_Motor : MonoBehaviour {
         if (fstepRunGrass == null) Debug.LogWarning("fstep_run_grass クリップが見つかりません");
         if (fstepWalkWater == null) Debug.LogWarning("fstep_walk_water クリップが見つかりません");
         if (fstepRunWater == null) Debug.LogWarning("fstep_run_water クリップが見つかりません");
+    }
+
+    void InitializeMovementOneShotAudio(){
+        if (movementOneShotAudioSource == null)
+            movementOneShotAudioSource = gameObject.AddComponent<AudioSource>();
+
+        movementOneShotAudioSource.playOnAwake = false;
+        movementOneShotAudioSource.loop = false;
+        movementOneShotAudioSource.volume = 1f;
+
+        jumpStartClip = Resources.Load<AudioClip>("Sounds/jump_start");
+        jumpEndClip = Resources.Load<AudioClip>("Sounds/jump_end");
+
+        if (jumpStartClip == null) Debug.LogWarning("jump_start クリップが見つかりません");
+        if (jumpEndClip == null) Debug.LogWarning("jump_end クリップが見つかりません");
     }
 
     void CheckForWaterHeight(){
@@ -454,6 +473,8 @@ public class CharController_Motor : MonoBehaviour {
     void UpdateAnimator(bool hasInput, bool isRunning, bool isGroundedLike){
         if (animator == null) return;
 
+        MoveState previousAnim = currentAnim;
+
         // 優先度：空中(ジャンプ/落下) > 走る > 歩く > 待機
         MoveState targetAnim;
         if (!isGroundedLike){
@@ -525,6 +546,35 @@ public class CharController_Motor : MonoBehaviour {
 
         if (transitioned)
             currentAnim = resolvedAnim;
+
+        if (currentAnim != previousAnim){
+            bool enteredJump = currentAnim == MoveState.Jump && previousAnim != MoveState.Jump;
+            bool landed = (previousAnim == MoveState.Jump || previousAnim == MoveState.Fall) && IsGroundMoveState(currentAnim);
+
+            if (enteredJump)
+                PlayJumpStartSound();
+
+            if (landed)
+                PlayJumpEndSound();
+        }
+    }
+
+    bool IsGroundMoveState(MoveState state){
+        return state == MoveState.Idle || state == MoveState.Walk || state == MoveState.Run;
+    }
+
+    void PlayJumpStartSound(){
+        if (movementOneShotAudioSource == null || jumpStartClip == null)
+            return;
+
+        movementOneShotAudioSource.PlayOneShot(jumpStartClip);
+    }
+
+    void PlayJumpEndSound(){
+        if (movementOneShotAudioSource == null || jumpEndClip == null)
+            return;
+
+        movementOneShotAudioSource.PlayOneShot(jumpEndClip);
     }
 
     void UpdateFootstepAudio(){

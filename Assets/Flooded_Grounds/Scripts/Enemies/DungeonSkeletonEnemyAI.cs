@@ -49,6 +49,16 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     [Header("Debug")]
     public bool logAnimationIssues = true;
 
+    [Header("Voice")]
+    public float voiceIntervalMin = 4.0f;
+    public float voiceIntervalMax = 9.0f;
+    public float voiceHearDistance = 22.0f;
+    [Range(0f, 1f)] public float voiceMinVolume = 0.05f;
+    [Range(0f, 1f)] public float voiceMaxVolume = 0.85f;
+    [Range(0f, 1f)] public float voiceSpatialBlend = 1f;
+    public float voiceMinDistance = 2f;
+    public float voiceMaxDistance = 24f;
+
     [Header("Lost Target Mark")]
     public float lostTargetMarkSeconds = 1.35f;
     public float lostTargetMarkHeight = 2.2f;
@@ -76,6 +86,10 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     private bool wasPlayerInvisibleLastFrame;
     private float lostTargetMarkTimer;
     private Camera cachedRenderCamera;
+    private AudioSource voiceAudioSource;
+    private AudioClip assignedVoiceClip;
+    private float voiceTimer;
+    private static int skeletonVoiceAssignCounter;
 
     private CharController_Motor playerMotor;
 
@@ -103,6 +117,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             PlayState(idleHash, 0.05f);
         }
 
+        InitializeVoiceAudio();
         ResolvePlayerReference();
         BeginIdle();
     }
@@ -121,6 +136,8 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         {
             attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - Time.deltaTime);
         }
+
+        UpdateVoicePlayback();
 
         ResolveOverlapWithNearbySkeletons();
 
@@ -258,6 +275,91 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
 
         player = playerObj.transform;
         playerMotor = playerObj.GetComponent<CharController_Motor>();
+    }
+
+    private void InitializeVoiceAudio()
+    {
+        if (voiceAudioSource == null)
+        {
+            voiceAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        voiceAudioSource.playOnAwake = false;
+        voiceAudioSource.loop = false;
+        voiceAudioSource.spatialBlend = Mathf.Clamp01(voiceSpatialBlend);
+        voiceAudioSource.minDistance = Mathf.Max(0.1f, voiceMinDistance);
+        voiceAudioSource.maxDistance = Mathf.Max(voiceAudioSource.minDistance + 0.1f, voiceMaxDistance);
+        voiceAudioSource.rolloffMode = AudioRolloffMode.Linear;
+
+        AudioClip[] voiceClips = new AudioClip[]
+        {
+            Resources.Load<AudioClip>("Sounds/skelton_voice1"),
+            Resources.Load<AudioClip>("Sounds/skelton_voice2"),
+            Resources.Load<AudioClip>("Sounds/skelton_voice3")
+        };
+
+        int validCount = 0;
+        for (int i = 0; i < voiceClips.Length; i++)
+        {
+            if (voiceClips[i] != null)
+                validCount++;
+        }
+
+        if (validCount <= 0)
+        {
+            Debug.LogWarning("[DungeonSkeletonEnemyAI] skelton_voice クリップが見つかりません");
+            return;
+        }
+
+        AudioClip[] validClips = new AudioClip[validCount];
+        int insert = 0;
+        for (int i = 0; i < voiceClips.Length; i++)
+        {
+            if (voiceClips[i] == null)
+                continue;
+
+            validClips[insert] = voiceClips[i];
+            insert++;
+        }
+
+        int assignIndex = skeletonVoiceAssignCounter % validClips.Length;
+        skeletonVoiceAssignCounter++;
+        assignedVoiceClip = validClips[assignIndex];
+
+        float firstMax = Mathf.Max(0.25f, voiceIntervalMax);
+        voiceTimer = Random.Range(0.15f, firstMax);
+    }
+
+    private void UpdateVoicePlayback()
+    {
+        if (voiceAudioSource == null || assignedVoiceClip == null)
+            return;
+
+        float intervalMin = Mathf.Max(0.1f, voiceIntervalMin);
+        float intervalMax = Mathf.Max(intervalMin, voiceIntervalMax);
+        float hearDistance = Mathf.Max(0.1f, voiceHearDistance);
+
+        float distanceFactor = 0f;
+        if (player != null)
+        {
+            float dist = Vector3.Distance(transform.position, player.position);
+            distanceFactor = Mathf.Clamp01(1f - (dist / hearDistance));
+        }
+
+        float minVolume = Mathf.Clamp01(voiceMinVolume);
+        float maxVolume = Mathf.Clamp(minVolume, 1f, voiceMaxVolume);
+        voiceAudioSource.volume = Mathf.Lerp(minVolume, maxVolume, distanceFactor);
+
+        voiceTimer -= Time.deltaTime;
+        if (voiceTimer > 0f)
+            return;
+
+        voiceTimer = Random.Range(intervalMin, intervalMax);
+        if (distanceFactor <= 0.01f)
+            return;
+
+        if (!voiceAudioSource.isPlaying)
+            voiceAudioSource.PlayOneShot(assignedVoiceClip, 1f);
     }
 
     private float GetPlayerDistance()
