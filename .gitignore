@@ -106,3 +106,12 @@ InitTestScene*.unity*
 /Assets/Matthew Guz/
 /Assets/Monster_Ghosts_FREE/
 /Assets/VisualX_Studio/
+
+#Wwise
+/Assets/WwiseSettings.xml
+/Assets/Wwise
+/Assets/StreamingAssets
+/Assets/WwiseSettings.xml.meta
+/Assets/Wwise.meta
+/Assets/StreamingAssets.meta
+/Flooded Grounds_WwiseProject
