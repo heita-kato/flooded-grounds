@@ -187,9 +187,25 @@ public class CharController_Motor : MonoBehaviour {
     AudioLowPassFilter listenerLowPassFilter;
     bool createdListenerLowPassFilter;
     float currentLowPassCutoffHz = 22000f;
-    [HideInInspector] public float footstepVolume = 0.85f;
-    [HideInInspector] public float footstepFadeInSeconds = 0.08f;
-    [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
+
+    [Header("Audio Volumes (Player)")]
+    [Range(0f, 1f)] public float footstepVolume = 0.85f;
+    [Range(0f, 1f)] public float footstepWalkGrassVolume = 1f;
+    [Range(0f, 1f)] public float footstepRunGrassVolume = 1f;
+    [Range(0f, 1f)] public float footstepWalkWaterVolume = 1f;
+    [Range(0f, 1f)] public float footstepRunWaterVolume = 1f;
+    [Range(0f, 1f)] public float jumpStartVolume = 1f;
+    [Range(0f, 1f)] public float jumpEndVolume = 1f;
+    [Range(0f, 1f)] public float ghostVoice1Volume = 1f;
+    [Range(0f, 1f)] public float ghostVoice23Volume = 1f;
+    [Range(0f, 1f)] public float ghostVoice4Volume = 1f;
+    [Range(0f, 1f)] public float invisibleSeVolume = 1f;
+    [Range(0f, 1f)] public float visibleSeVolume = 1f;
+    public float footstepFadeInSeconds = 0.08f;
+    public float footstepFadeOutSeconds = 0.12f;
+    public float footstepLiveVolumeAdjustSpeed = 8f;
+
+    float currentFootstepTargetVolume;
     bool isInWaterSurface;
 
     // アニメーション状態
@@ -527,15 +543,25 @@ public class CharController_Motor : MonoBehaviour {
             return;
 
         AudioClip clip = null;
+        float volume = 1f;
         if (messageIndex == 0)
+        {
             clip = ghostVoice1Clip;
+            volume = ghostVoice1Volume;
+        }
         else if (messageIndex == 1 || messageIndex == 2)
+        {
             clip = ghostVoice23Clip;
+            volume = ghostVoice23Volume;
+        }
         else if (messageIndex == 3)
+        {
             clip = ghostVoice4Clip;
+            volume = ghostVoice4Volume;
+        }
 
         if (clip != null)
-            movementOneShotAudioSource.PlayOneShot(clip);
+            movementOneShotAudioSource.PlayOneShot(clip, Mathf.Clamp01(volume));
     }
 
     void EndGhostDialogue(){
@@ -669,14 +695,14 @@ public class CharController_Motor : MonoBehaviour {
         if (movementOneShotAudioSource == null || jumpStartClip == null)
             return;
 
-        movementOneShotAudioSource.PlayOneShot(jumpStartClip);
+        movementOneShotAudioSource.PlayOneShot(jumpStartClip, Mathf.Clamp01(jumpStartVolume));
     }
 
     void PlayJumpEndSound(){
         if (movementOneShotAudioSource == null || jumpEndClip == null)
             return;
 
-        movementOneShotAudioSource.PlayOneShot(jumpEndClip);
+        movementOneShotAudioSource.PlayOneShot(jumpEndClip, Mathf.Clamp01(jumpEndVolume));
     }
 
     void UpdateFootstepAudio(){
@@ -691,6 +717,8 @@ public class CharController_Motor : MonoBehaviour {
             targetClip = isInWaterSurface ? fstepRunWater : fstepRunGrass;
         }
 
+        currentFootstepTargetVolume = GetFootstepTargetVolume(targetClip);
+
         if (targetClip == null){
             if (currentFootstepClip != null || footstepAudioSource.isPlaying)
                 StopFootstepWithFade();
@@ -700,6 +728,8 @@ public class CharController_Motor : MonoBehaviour {
         if (currentFootstepClip == targetClip){
             if (!footstepAudioSource.isPlaying)
                 StartFootstepWithFade(targetClip);
+            else if (footstepFadeRoutine == null)
+                footstepAudioSource.volume = Mathf.MoveTowards(footstepAudioSource.volume, currentFootstepTargetVolume, Mathf.Max(0f, footstepLiveVolumeAdjustSpeed) * Time.deltaTime);
             return;
         }
 
@@ -710,6 +740,23 @@ public class CharController_Motor : MonoBehaviour {
         }
 
         SwitchFootstepWithFade(targetClip);
+    }
+
+    float GetFootstepTargetVolume(AudioClip clip){
+        float master = Mathf.Clamp01(footstepVolume);
+        if (clip == null)
+            return 0f;
+
+        if (clip == fstepWalkGrass)
+            return master * Mathf.Clamp01(footstepWalkGrassVolume);
+        if (clip == fstepRunGrass)
+            return master * Mathf.Clamp01(footstepRunGrassVolume);
+        if (clip == fstepWalkWater)
+            return master * Mathf.Clamp01(footstepWalkWaterVolume);
+        if (clip == fstepRunWater)
+            return master * Mathf.Clamp01(footstepRunWaterVolume);
+
+        return master;
     }
 
     bool IsPlayerInWater(){
@@ -744,7 +791,7 @@ public class CharController_Motor : MonoBehaviour {
         footstepAudioSource.volume = 0f;
         footstepAudioSource.loop = true;
         footstepAudioSource.Play();
-        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(Mathf.Max(0f, footstepVolume), Mathf.Max(0f, footstepFadeInSeconds), false));
+        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(currentFootstepTargetVolume, Mathf.Max(0f, footstepFadeInSeconds), false));
     }
 
     void StopFootstepWithFade(){
@@ -786,7 +833,7 @@ public class CharController_Motor : MonoBehaviour {
         footstepAudioSource.loop = true;
         footstepAudioSource.Play();
 
-        yield return FadeFootstepVolume(Mathf.Max(0f, footstepVolume), fadeIn, false);
+        yield return FadeFootstepVolume(currentFootstepTargetVolume, fadeIn, false);
     }
 
     IEnumerator FadeFootstepVolume(float targetVolume, float duration, bool stopAfterFade){
@@ -1652,7 +1699,7 @@ public class CharController_Motor : MonoBehaviour {
 
         AudioClip clip = nowInvisible ? invisibleSeClip : visibleSeClip;
         if (clip != null)
-            movementOneShotAudioSource.PlayOneShot(clip);
+            movementOneShotAudioSource.PlayOneShot(clip, Mathf.Clamp01(nowInvisible ? invisibleSeVolume : visibleSeVolume));
     }
 
     IEnumerator AnimateDissolve(float target){

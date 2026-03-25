@@ -58,12 +58,20 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     [Range(0f, 1f)] public float voiceSpatialBlend = 1f;
     public float voiceMinDistance = 2f;
     public float voiceMaxDistance = 24f;
+    [Range(0f, 1f)] public float voice1Volume = 1f;
+    [Range(0f, 1f)] public float voice2Volume = 1f;
+    [Range(0f, 1f)] public float voice3Volume = 1f;
 
     [Header("Attack SFX")]
     public float attackSfxSpatialBlend = 1f;
     public float attackSfxMinDistance = 1.5f;
     public float attackSfxMaxDistance = 20f;
     [Range(0f, 1f)] public float attackSfxVolume = 0.95f;
+    [Range(0f, 1f)] public float attack1Volume = 1f;
+    [Range(0f, 1f)] public float attack2Volume = 1f;
+    [Range(0f, 1f)] public float attack3Volume = 1f;
+    [Range(0f, 1f)] public float attack4Volume = 1f;
+    [Range(0f, 1f)] public float damageVolume = 1f;
 
     [Header("Walk SFX")]
     public float walkSfxHearDistance = 18f;
@@ -71,6 +79,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     public float walkSfxMinDistance = 1.2f;
     public float walkSfxMaxDistance = 18f;
     [Range(0f, 1f)] public float walkSfxSpatialBlend = 1f;
+    [Range(0f, 1f)] public float walkClipVolume = 1f;
 
     [Header("Lost Target Mark")]
     public float lostTargetMarkSeconds = 1.35f;
@@ -103,7 +112,9 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     private AudioSource attackSfxAudioSource;
     private AudioSource walkLoopAudioSource;
     private AudioClip assignedVoiceClip;
+    private float assignedVoiceVolume = 1f;
     private AudioClip[] attackClips;
+    private float[] attackClipVolumes;
     private AudioClip damageClip;
     private AudioClip walkLoopClip;
     private float voiceTimer;
@@ -322,6 +333,12 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             Resources.Load<AudioClip>("Sounds/skelton_voice2"),
             Resources.Load<AudioClip>("Sounds/skelton_voice3")
         };
+        float[] voiceVolumes = new float[]
+        {
+            Mathf.Clamp01(voice1Volume),
+            Mathf.Clamp01(voice2Volume),
+            Mathf.Clamp01(voice3Volume)
+        };
 
         int validCount = 0;
         for (int i = 0; i < voiceClips.Length; i++)
@@ -337,6 +354,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         }
 
         AudioClip[] validClips = new AudioClip[validCount];
+        float[] validVolumes = new float[validCount];
         int insert = 0;
         for (int i = 0; i < voiceClips.Length; i++)
         {
@@ -344,12 +362,14 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
                 continue;
 
             validClips[insert] = voiceClips[i];
+            validVolumes[insert] = voiceVolumes[i];
             insert++;
         }
 
         int assignIndex = skeletonVoiceAssignCounter % validClips.Length;
         skeletonVoiceAssignCounter++;
         assignedVoiceClip = validClips[assignIndex];
+        assignedVoiceVolume = validVolumes[assignIndex];
 
         float firstMax = Mathf.Max(0.25f, voiceIntervalMax);
         voiceTimer = Random.Range(0.15f, firstMax);
@@ -373,6 +393,13 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             Resources.Load<AudioClip>("Sounds/skelton_attack2"),
             Resources.Load<AudioClip>("Sounds/skelton_attack3"),
             Resources.Load<AudioClip>("Sounds/skelton_attack4")
+        };
+        attackClipVolumes = new float[]
+        {
+            Mathf.Clamp01(attack1Volume),
+            Mathf.Clamp01(attack2Volume),
+            Mathf.Clamp01(attack3Volume),
+            Mathf.Clamp01(attack4Volume)
         };
 
         damageClip = Resources.Load<AudioClip>("Sounds/damage");
@@ -418,7 +445,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             distanceFactor = Mathf.Clamp01(1f - (dist / hearDistance));
         }
 
-        float targetVolume = Mathf.Clamp01(walkSfxMaxVolume) * distanceFactor;
+        float targetVolume = Mathf.Clamp01(walkSfxMaxVolume) * Mathf.Clamp01(walkClipVolume) * distanceFactor;
         walkLoopAudioSource.volume = targetVolume;
 
         if (targetVolume <= 0.001f)
@@ -440,6 +467,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         attackSfxAudioSource.volume = Mathf.Clamp01(attackSfxVolume);
 
         AudioClip attackClip = null;
+        float attackClipVolume = 1f;
         if (attackClips != null && attackClips.Length > 0)
         {
             int validCount = 0;
@@ -461,6 +489,8 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
                     if (cursor == pick)
                     {
                         attackClip = attackClips[i];
+                        if (attackClipVolumes != null && i < attackClipVolumes.Length)
+                            attackClipVolume = Mathf.Clamp01(attackClipVolumes[i]);
                         break;
                     }
                     cursor++;
@@ -469,10 +499,10 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         }
 
         if (attackClip != null)
-            attackSfxAudioSource.PlayOneShot(attackClip, 1f);
+            attackSfxAudioSource.PlayOneShot(attackClip, attackClipVolume);
 
         if (damageClip != null)
-            attackSfxAudioSource.PlayOneShot(damageClip, 1f);
+            attackSfxAudioSource.PlayOneShot(damageClip, Mathf.Clamp01(damageVolume));
     }
 
     private void UpdateVoicePlayback()
@@ -504,7 +534,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             return;
 
         if (!voiceAudioSource.isPlaying)
-            voiceAudioSource.PlayOneShot(assignedVoiceClip, 1f);
+            voiceAudioSource.PlayOneShot(assignedVoiceClip, Mathf.Clamp01(assignedVoiceVolume));
     }
 
     private float GetPlayerDistance()

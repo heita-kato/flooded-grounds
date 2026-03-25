@@ -7,7 +7,9 @@ public class BgmCrossfadeController : MonoBehaviour
     [Header("BGM")]
     [SerializeField] private string mainBgmResourcePath = "Music/main-bgm";
     [SerializeField] private string battleBgmResourcePath = "Music/battle-bgm";
-    [SerializeField] private float masterVolume = 0.65f;
+    [SerializeField, Range(0f, 1f)] private float masterVolume = 0.65f;
+    [SerializeField, Range(0f, 1f)] private float mainBgmVolume = 1f;
+    [SerializeField, Range(0f, 1f)] private float battleBgmVolume = 1f;
     [SerializeField] private float crossfadeSeconds = 1.4f;
 
     [Header("Battle Detection")]
@@ -30,6 +32,8 @@ public class BgmCrossfadeController : MonoBehaviour
     private bool isFading;
     private AudioSource fadeOutSource;
     private AudioSource fadeInSource;
+    private float fadeOutStartVolume;
+    private float fadeInStartVolume;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
@@ -68,6 +72,9 @@ public class BgmCrossfadeController : MonoBehaviour
     {
         if (mainClip == null || battleClip == null)
             return;
+
+        if (!isFading && activeSource != null && activeSource.clip != null)
+            activeSource.volume = GetClipTargetVolume(activeSource.clip);
 
         if (player == null)
             TryFindPlayer();
@@ -193,7 +200,7 @@ public class BgmCrossfadeController : MonoBehaviour
 
         activeSource.Stop();
         activeSource.clip = clip;
-        activeSource.volume = Mathf.Clamp01(masterVolume);
+        activeSource.volume = GetClipTargetVolume(clip);
         activeSource.Play();
 
         AudioSource idle = activeSource == sourceA ? sourceB : sourceA;
@@ -220,8 +227,22 @@ public class BgmCrossfadeController : MonoBehaviour
         fadeInSource.volume = 0f;
         fadeInSource.Play();
 
+        fadeOutStartVolume = fadeOutSource != null ? fadeOutSource.volume : 0f;
+        fadeInStartVolume = fadeInSource.volume;
+
         fadeElapsed = 0f;
         isFading = true;
+    }
+
+    private float GetClipTargetVolume(AudioClip clip)
+    {
+        float baseVolume = Mathf.Clamp01(masterVolume);
+        if (clip == mainClip)
+            return baseVolume * Mathf.Clamp01(mainBgmVolume);
+        if (clip == battleClip)
+            return baseVolume * Mathf.Clamp01(battleBgmVolume);
+
+        return baseVolume;
     }
 
     private void UpdateCrossfade()
@@ -236,9 +257,9 @@ public class BgmCrossfadeController : MonoBehaviour
         fadeElapsed += Time.deltaTime;
         float t = Mathf.Clamp01(fadeElapsed / duration);
 
-        float target = Mathf.Clamp01(masterVolume);
-        fadeInSource.volume = Mathf.Lerp(0f, target, t);
-        fadeOutSource.volume = Mathf.Lerp(target, 0f, t);
+        float fadeInTarget = GetClipTargetVolume(fadeInSource.clip);
+        fadeInSource.volume = Mathf.Lerp(fadeInStartVolume, fadeInTarget, t);
+        fadeOutSource.volume = Mathf.Lerp(fadeOutStartVolume, 0f, t);
 
         if (t < 1f)
             return;
