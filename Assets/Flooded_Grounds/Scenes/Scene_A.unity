@@ -127448,6 +127448,23 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22
@@ -147149,6 +147166,23 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22
@@ -201146,6 +201180,7 @@ MonoBehaviour:
   acceleration: 5
   deceleration: 5
   WaterHeight: 15.6
+  maxWaterSubmergeDepth: 0.85
   waterSurfaceSupportDepth: 1.2
   groundStickForce: 2
   inputDeadZone: 0.2
@@ -201194,7 +201229,11 @@ MonoBehaviour:
   hpGaugeSideVfxPrefab: {fileID: 0}
   hpGaugeSideVfxOffset: {x: 52, y: 12}
   hpGaugeSideVfxScale: {x: 0.42, y: 0.42, z: 0.42}
-  showDebugInfo: 0
+  showDebugInfo: 1
+  invisibilitySfxVolume: 1
+  footstepVolume: 0.85
+  footstepFadeInSeconds: 0.08
+  footstepFadeOutSeconds: 0.12
 --- !u!143 &1780305044
 CharacterController:
   m_ObjectHideFlags: 0
@@ -237905,6 +237944,23 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22

@@ -177,6 +177,8 @@ public class CharController_Motor : MonoBehaviour {
     AudioClip ghostVoice1Clip;
     AudioClip ghostVoice23Clip;
     AudioClip ghostVoice4Clip;
+    AudioClip invisibleSeClip;
+    AudioClip visibleSeClip;
     [HideInInspector] public float footstepVolume = 0.85f;
     [HideInInspector] public float footstepFadeInSeconds = 0.08f;
     [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
@@ -256,12 +258,16 @@ public class CharController_Motor : MonoBehaviour {
         ghostVoice1Clip = Resources.Load<AudioClip>("Sounds/ghost_voice1");
         ghostVoice23Clip = Resources.Load<AudioClip>("Sounds/ghost_voice23");
         ghostVoice4Clip = Resources.Load<AudioClip>("Sounds/ghost_voice4");
+        invisibleSeClip = Resources.Load<AudioClip>("Sounds/invisible_se");
+        visibleSeClip = Resources.Load<AudioClip>("Sounds/visible_se");
 
         if (jumpStartClip == null) Debug.LogWarning("jump_start クリップが見つかりません");
         if (jumpEndClip == null) Debug.LogWarning("jump_end クリップが見つかりません");
         if (ghostVoice1Clip == null) Debug.LogWarning("ghost_voice1 クリップが見つかりません");
         if (ghostVoice23Clip == null) Debug.LogWarning("ghost_voice23 クリップが見つかりません");
         if (ghostVoice4Clip == null) Debug.LogWarning("ghost_voice4 クリップが見つかりません");
+        if (invisibleSeClip == null) Debug.LogWarning("invisible_se クリップが見つかりません");
+        if (visibleSeClip == null) Debug.LogWarning("visible_se クリップが見つかりません");
     }
 
     void CheckForWaterHeight(){
@@ -1553,13 +1559,26 @@ public class CharController_Motor : MonoBehaviour {
         if (dissolveMaterials.Count == 0 && !BuildDissolveMaterialsFromTemplate())
             return;
 
+        if (isInvisible == makeInvisible)
+            return;
+
         isInvisible = makeInvisible;
         float target = isInvisible ? invisibleDissolveAmount : visibleDissolveAmount;
+        PlayInvisibilityToggleSound(isInvisible);
 
         if (dissolveRoutine != null)
             StopCoroutine(dissolveRoutine);
 
         dissolveRoutine = StartCoroutine(AnimateDissolve(target));
+    }
+
+    void PlayInvisibilityToggleSound(bool nowInvisible){
+        if (movementOneShotAudioSource == null)
+            return;
+
+        AudioClip clip = nowInvisible ? invisibleSeClip : visibleSeClip;
+        if (clip != null)
+            movementOneShotAudioSource.PlayOneShot(clip);
     }
 
     IEnumerator AnimateDissolve(float target){
