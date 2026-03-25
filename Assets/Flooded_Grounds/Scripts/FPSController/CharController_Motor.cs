@@ -90,6 +90,11 @@ public class CharController_Motor : MonoBehaviour {
     public Material dissolveFallbackMaterial;
     public bool logInvisibilityIssues = true;
 
+    [Header("Invisibility Audio")]
+    [Range(10f, 22000f)] public float normalLowPassCutoffHz = 22000f;
+    [Range(10f, 22000f)] public float invisibleLowPassCutoffHz = 1200f;
+    public float lowPassTransitionSeconds = 0.25f;
+
     [Header("HUD")]
     public float invisIconFadeSpeed = 7.5f;
     public float radarSize = 140f;
@@ -179,6 +184,9 @@ public class CharController_Motor : MonoBehaviour {
     AudioClip ghostVoice4Clip;
     AudioClip invisibleSeClip;
     AudioClip visibleSeClip;
+    AudioLowPassFilter listenerLowPassFilter;
+    bool createdListenerLowPassFilter;
+    float currentLowPassCutoffHz = 22000f;
     [HideInInspector] public float footstepVolume = 0.85f;
     [HideInInspector] public float footstepFadeInSeconds = 0.08f;
     [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
@@ -221,6 +229,8 @@ public class CharController_Motor : MonoBehaviour {
         EnsureHpGaugeSideVfx();
         InitializeFootstepAudio();
         InitializeMovementOneShotAudio();
+        SetupInvisibilityLowPassFilter();
+        ApplyLowPassCutoffInstant(normalLowPassCutoffHz);
     }
 
     void InitializeFootstepAudio(){
@@ -270,6 +280,62 @@ public class CharController_Motor : MonoBehaviour {
         if (visibleSeClip == null) Debug.LogWarning("visible_se クリップが見つかりません");
     }
 
+    void SetupInvisibilityLowPassFilter(){
+        if (listenerLowPassFilter != null)
+            return;
+
+        AudioListener listener = null;
+        if (cam != null)
+            listener = cam.GetComponentInChildren<AudioListener>(true);
+
+        if (listener == null)
+            listener = FindObjectOfType<AudioListener>();
+
+        if (listener == null){
+            if (logInvisibilityIssues)
+                Debug.LogWarning("[CharController_Motor] AudioListener が見つからないため、透明化ローパスを適用できません。");
+            return;
+        }
+
+        listenerLowPassFilter = listener.GetComponent<AudioLowPassFilter>();
+        if (listenerLowPassFilter == null){
+            listenerLowPassFilter = listener.gameObject.AddComponent<AudioLowPassFilter>();
+            createdListenerLowPassFilter = true;
+        }
+
+        listenerLowPassFilter.enabled = true;
+    }
+
+    void UpdateInvisibilityLowPassFilter(){
+        if (listenerLowPassFilter == null)
+            SetupInvisibilityLowPassFilter();
+
+        if (listenerLowPassFilter == null)
+            return;
+
+        float normal = Mathf.Clamp(normalLowPassCutoffHz, 10f, 22000f);
+        float invisible = Mathf.Clamp(invisibleLowPassCutoffHz, 10f, 22000f);
+        float targetCutoff = isInvisible ? invisible : normal;
+        float duration = Mathf.Max(0.01f, lowPassTransitionSeconds);
+        float speed = Mathf.Abs(normal - invisible) / duration;
+
+        if (speed <= 0.0001f)
+            currentLowPassCutoffHz = targetCutoff;
+        else
+            currentLowPassCutoffHz = Mathf.MoveTowards(currentLowPassCutoffHz, targetCutoff, speed * Time.deltaTime);
+
+        listenerLowPassFilter.cutoffFrequency = currentLowPassCutoffHz;
+    }
+
+    void ApplyLowPassCutoffInstant(float cutoffHz){
+        if (listenerLowPassFilter == null)
+            SetupInvisibilityLowPassFilter();
+
+        currentLowPassCutoffHz = Mathf.Clamp(cutoffHz, 10f, 22000f);
+        if (listenerLowPassFilter != null)
+            listenerLowPassFilter.cutoffFrequency = currentLowPassCutoffHz;
+    }
+
     void CheckForWaterHeight(){
         gravity = (transform.position.y < WaterHeight) ? 0f : -9.8f;
     }
@@ -277,6 +343,8 @@ public class CharController_Motor : MonoBehaviour {
     void Update(){
         if (Input.GetKeyDown(invisibilityToggleKey))
             SetInvisibility(!isInvisible);
+
+        UpdateInvisibilityLowPassFilter();
 
         float iconTarget = isInvisible ? 1f : 0f;
         invisibilityIconBlend = Mathf.MoveTowards(invisibilityIconBlend, iconTarget, Mathf.Max(0.01f, invisIconFadeSpeed) * Time.deltaTime);
@@ -1454,6 +1522,12 @@ public class CharController_Motor : MonoBehaviour {
         DestroyHpGaugeSideVfx();
         if (createdHudOverlayCanvas && hudOverlayCanvas != null)
             Destroy(hudOverlayCanvas.gameObject);
+
+        if (listenerLowPassFilter != null){
+            listenerLowPassFilter.cutoffFrequency = Mathf.Clamp(normalLowPassCutoffHz, 10f, 22000f);
+            if (createdListenerLowPassFilter)
+                Destroy(listenerLowPassFilter);
+        }
 
         CleanupRuntimeDissolveInstances();
 
