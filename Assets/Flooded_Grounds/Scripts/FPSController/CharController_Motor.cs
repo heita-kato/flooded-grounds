@@ -32,6 +32,7 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public float acceleration = 5.0f;
     [HideInInspector] public float deceleration = 10.0f;
     [HideInInspector] public float WaterHeight = 15.5f;
+    [HideInInspector] public float maxWaterSubmergeDepth = 0.85f;
     [HideInInspector] public float waterSurfaceSupportDepth = 1.2f;
     [HideInInspector] public float groundStickForce = 2.0f;
     [HideInInspector] public float inputDeadZone = 0.2f;
@@ -162,6 +163,19 @@ public class CharController_Motor : MonoBehaviour {
     GameObject hpGaugeSideVfxInstance;
     RectTransform hpGaugeSideVfxRect;
 
+    // --- 足音効果音 ---
+    AudioSource footstepAudioSource;
+    AudioClip fstepWalkGrass;
+    AudioClip fstepRunGrass;
+    AudioClip fstepWalkWater;
+    AudioClip fstepRunWater;
+    AudioClip currentFootstepClip;
+    Coroutine footstepFadeRoutine;
+    [HideInInspector] public float footstepVolume = 0.85f;
+    [HideInInspector] public float footstepFadeInSeconds = 0.08f;
+    [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
+    bool isInWaterSurface;
+
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
 
@@ -197,6 +211,29 @@ public class CharController_Motor : MonoBehaviour {
         TryAssignHudVfxPrefabsInEditor();
         EnsureHudOverlayCanvas();
         EnsureHpGaugeSideVfx();
+        InitializeFootstepAudio();
+    }
+
+    void InitializeFootstepAudio(){
+        // 足音専用のAudioSourceを用意
+        if (footstepAudioSource == null){
+            footstepAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        footstepAudioSource.playOnAwake = false;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.volume = 0f;
+
+        // 効果音クリップをResources/Soundsから読み込む
+        fstepWalkGrass = Resources.Load<AudioClip>("Sounds/fstep_walk_grass");
+        fstepRunGrass = Resources.Load<AudioClip>("Sounds/fstep_run_grass");
+        fstepWalkWater = Resources.Load<AudioClip>("Sounds/fstep_walk_water");
+        fstepRunWater = Resources.Load<AudioClip>("Sounds/fstep_run_water");
+
+        if (fstepWalkGrass == null) Debug.LogWarning("fstep_walk_grass クリップが見つかりません");
+        if (fstepRunGrass == null) Debug.LogWarning("fstep_run_grass クリップが見つかりません");
+        if (fstepWalkWater == null) Debug.LogWarning("fstep_walk_water クリップが見つかりません");
+        if (fstepRunWater == null) Debug.LogWarning("fstep_run_water クリップが見つかりません");
     }
 
     void CheckForWaterHeight(){
@@ -255,6 +292,7 @@ public class CharController_Motor : MonoBehaviour {
             horizontalSpeed = 0f;
 
         CheckForWaterHeight();
+        isInWaterSurface = IsPlayerInWater();
         bool isGroundedLike = character.isGrounded || IsWithinWaterSurfaceSupportRange();
 
         // --- 水平移動 ---
@@ -290,9 +328,11 @@ public class CharController_Motor : MonoBehaviour {
         verticalVelocity += gravity * Time.deltaTime;
         Vector3 finalMovement = (movement * horizontalSpeed) + (Vector3.up * verticalVelocity);
         character.Move(finalMovement * Time.deltaTime);
+        ClampPlayerHeightInWater();
 
         // --- アニメーション更新 ---
         UpdateAnimator(hasInput, isRunning, isGroundedLike);
+        UpdateFootstepAudio();
 
         // --- ゴースト会話入力 ---
         if (IsGhostInteractPressed()){
@@ -487,6 +527,142 @@ public class CharController_Motor : MonoBehaviour {
             currentAnim = resolvedAnim;
     }
 
+    void UpdateFootstepAudio(){
+        if (footstepAudioSource == null) return;
+
+        // 現在の状態に応じた足音クリップを決定
+        AudioClip targetClip = null;
+
+        if (currentAnim == MoveState.Walk){
+            targetClip = isInWaterSurface ? fstepWalkWater : fstepWalkGrass;
+        } else if (currentAnim == MoveState.Run){
+            targetClip = isInWaterSurface ? fstepRunWater : fstepRunGrass;
+        }
+
+        if (targetClip == null){
+            if (currentFootstepClip != null || footstepAudioSource.isPlaying)
+                StopFootstepWithFade();
+            return;
+        }
+
+        if (currentFootstepClip == targetClip){
+            if (!footstepAudioSource.isPlaying)
+                StartFootstepWithFade(targetClip);
+            return;
+        }
+
+        currentFootstepClip = targetClip;
+        if (!footstepAudioSource.isPlaying){
+            StartFootstepWithFade(targetClip);
+            return;
+        }
+
+        SwitchFootstepWithFade(targetClip);
+    }
+
+    bool IsPlayerInWater(){
+        return transform.position.y < WaterHeight;
+    }
+
+    void ClampPlayerHeightInWater(){
+        if (!IsPlayerInWater())
+            return;
+
+        float clampedDepth = Mathf.Max(0f, maxWaterSubmergeDepth);
+        float minAllowedY = WaterHeight - clampedDepth;
+
+        if (transform.position.y < minAllowedY){
+            Vector3 pos = transform.position;
+            pos.y = minAllowedY;
+            transform.position = pos;
+
+            if (verticalVelocity < 0f)
+                verticalVelocity = 0f;
+        }
+    }
+
+    void StartFootstepWithFade(AudioClip clip){
+        if (clip == null || footstepAudioSource == null)
+            return;
+
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        footstepAudioSource.clip = clip;
+        footstepAudioSource.volume = 0f;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.Play();
+        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(Mathf.Max(0f, footstepVolume), Mathf.Max(0f, footstepFadeInSeconds), false));
+    }
+
+    void StopFootstepWithFade(){
+        if (footstepAudioSource == null)
+            return;
+
+        currentFootstepClip = null;
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        if (!footstepAudioSource.isPlaying){
+            footstepAudioSource.clip = null;
+            footstepAudioSource.volume = 0f;
+            return;
+        }
+
+        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(0f, Mathf.Max(0f, footstepFadeOutSeconds), true));
+    }
+
+    void SwitchFootstepWithFade(AudioClip nextClip){
+        if (nextClip == null || footstepAudioSource == null)
+            return;
+
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        footstepFadeRoutine = StartCoroutine(FadeSwitchRoutine(nextClip));
+    }
+
+    IEnumerator FadeSwitchRoutine(AudioClip nextClip){
+        float fadeOut = Mathf.Max(0f, footstepFadeOutSeconds * 0.65f);
+        float fadeIn = Mathf.Max(0f, footstepFadeInSeconds * 0.65f);
+
+        yield return FadeFootstepVolume(0f, fadeOut, false);
+
+        footstepAudioSource.Stop();
+        footstepAudioSource.clip = nextClip;
+        footstepAudioSource.volume = 0f;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.Play();
+
+        yield return FadeFootstepVolume(Mathf.Max(0f, footstepVolume), fadeIn, false);
+    }
+
+    IEnumerator FadeFootstepVolume(float targetVolume, float duration, bool stopAfterFade){
+        if (footstepAudioSource == null)
+            yield break;
+
+        float startVolume = footstepAudioSource.volume;
+        if (duration <= 0.0001f){
+            footstepAudioSource.volume = targetVolume;
+        } else {
+            float elapsed = 0f;
+            while (elapsed < duration){
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                footstepAudioSource.volume = Mathf.Lerp(startVolume, targetVolume, t);
+                yield return null;
+            }
+            footstepAudioSource.volume = targetVolume;
+        }
+
+        if (stopAfterFade && footstepAudioSource.volume <= 0.0001f){
+            footstepAudioSource.Stop();
+            footstepAudioSource.clip = null;
+        }
+
+        footstepFadeRoutine = null;
+    }
+
     bool IsWithinWaterSurfaceSupportRange(){
         if (waterSurfaceSupportDepth <= 0f)
             return false;
@@ -569,7 +745,8 @@ public class CharController_Motor : MonoBehaviour {
             GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
             
             // 追加情報：速度、状態
-            string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: ground";
+            string surfaceType = isInWaterSurface ? "water" : "ground";
+            string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: {surfaceType}";
             GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
 
             string testText = $"Sound: Background music";
