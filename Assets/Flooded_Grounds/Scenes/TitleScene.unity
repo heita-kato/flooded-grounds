@@ -292,6 +292,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   fadeDuration: 0.6
+  titleBgmVolume: 0.72
+  startSeVolume: 0.665
 --- !u!1 &532814869
 GameObject:
   m_ObjectHideFlags: 0
