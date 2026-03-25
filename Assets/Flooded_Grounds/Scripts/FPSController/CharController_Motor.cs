@@ -174,6 +174,9 @@ public class CharController_Motor : MonoBehaviour {
     AudioSource movementOneShotAudioSource;
     AudioClip jumpStartClip;
     AudioClip jumpEndClip;
+    AudioClip ghostVoice1Clip;
+    AudioClip ghostVoice23Clip;
+    AudioClip ghostVoice4Clip;
     [HideInInspector] public float footstepVolume = 0.85f;
     [HideInInspector] public float footstepFadeInSeconds = 0.08f;
     [HideInInspector] public float footstepFadeOutSeconds = 0.12f;
@@ -250,9 +253,15 @@ public class CharController_Motor : MonoBehaviour {
 
         jumpStartClip = Resources.Load<AudioClip>("Sounds/jump_start");
         jumpEndClip = Resources.Load<AudioClip>("Sounds/jump_end");
+        ghostVoice1Clip = Resources.Load<AudioClip>("Sounds/ghost_voice1");
+        ghostVoice23Clip = Resources.Load<AudioClip>("Sounds/ghost_voice23");
+        ghostVoice4Clip = Resources.Load<AudioClip>("Sounds/ghost_voice4");
 
         if (jumpStartClip == null) Debug.LogWarning("jump_start クリップが見つかりません");
         if (jumpEndClip == null) Debug.LogWarning("jump_end クリップが見つかりません");
+        if (ghostVoice1Clip == null) Debug.LogWarning("ghost_voice1 クリップが見つかりません");
+        if (ghostVoice23Clip == null) Debug.LogWarning("ghost_voice23 クリップが見つかりません");
+        if (ghostVoice4Clip == null) Debug.LogWarning("ghost_voice4 クリップが見つかりません");
     }
 
     void CheckForWaterHeight(){
@@ -413,6 +422,7 @@ public class CharController_Motor : MonoBehaviour {
     void StartGhostDialogue(Transform ghost){
         isGhostDialogueActive = true;
         ghostMessageIndex = 0;
+        PlayGhostDialogueVoiceForIndex(ghostMessageIndex);
 
         if (orbitCamera == null && cam != null)
             orbitCamera = cam.GetComponent<ThirdPersonOrbitCamera>();
@@ -434,6 +444,24 @@ public class CharController_Motor : MonoBehaviour {
         ghostMessageIndex++;
         if (ghostMessageIndex >= messageCount)
             EndGhostDialogue();
+        else
+            PlayGhostDialogueVoiceForIndex(ghostMessageIndex);
+    }
+
+    void PlayGhostDialogueVoiceForIndex(int messageIndex){
+        if (movementOneShotAudioSource == null)
+            return;
+
+        AudioClip clip = null;
+        if (messageIndex == 0)
+            clip = ghostVoice1Clip;
+        else if (messageIndex == 1 || messageIndex == 2)
+            clip = ghostVoice23Clip;
+        else if (messageIndex == 3)
+            clip = ghostVoice4Clip;
+
+        if (clip != null)
+            movementOneShotAudioSource.PlayOneShot(clip);
     }
 
     void EndGhostDialogue(){
