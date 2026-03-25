@@ -107,6 +107,9 @@ public class CharController_Motor : MonoBehaviour {
     public GameObject hpGaugeSideVfxPrefab;
     public Vector2 hpGaugeSideVfxOffset = new Vector2(52f, 12f);
     public Vector3 hpGaugeSideVfxScale = new Vector3(0.42f, 0.42f, 0.42f);
+    public float hpGaugeSideVfxEnemyEnterDistance = 14f;
+    public float hpGaugeSideVfxEnemyExitDistance = 20f;
+    public float hpGaugeSideVfxFadeSpeed = 3.2f;
 
     [Header("Debug")]
     public bool showDebugInfo = true;
@@ -167,6 +170,9 @@ public class CharController_Motor : MonoBehaviour {
     bool createdHudOverlayCanvas;
     GameObject hpGaugeSideVfxInstance;
     RectTransform hpGaugeSideVfxRect;
+    CanvasGroup hpGaugeSideVfxCanvasGroup;
+    float hpGaugeSideVfxAlpha;
+    bool hpGaugeSideVfxInBattleRange;
 
     // --- 足音効果音 ---
     AudioSource footstepAudioSource;
@@ -948,7 +954,7 @@ public class CharController_Motor : MonoBehaviour {
             string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: {surfaceType}";
             GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
 
-            string testText = $"Sound: Background music";
+            string testText = $"BGM: {GetCurrentPlayingBgmName()}";
             GUI.Label(new Rect(10, 70, 400, 30), testText, debugLabelStyle);
         }
 
@@ -1000,6 +1006,23 @@ public class CharController_Motor : MonoBehaviour {
 
     public bool IsInvisible(){
         return isInvisible;
+    }
+
+    string GetCurrentPlayingBgmName(){
+        GameObject bgmRoot = GameObject.Find("BgmCrossfadeController_Runtime");
+        if (bgmRoot == null)
+            return "None";
+
+        AudioSource[] sources = bgmRoot.GetComponents<AudioSource>();
+        for (int i = 0; i < sources.Length; i++){
+            AudioSource source = sources[i];
+            if (source == null || !source.isPlaying || source.clip == null)
+                continue;
+
+            return source.clip.name;
+        }
+
+        return "None";
     }
 
     string GetCurrentGhostMessage(){
@@ -1105,6 +1128,15 @@ public class CharController_Motor : MonoBehaviour {
 
         hpGaugeSideVfxInstance = Instantiate(hpGaugeSideVfxPrefab, hudOverlayCanvas.transform, false);
         hpGaugeSideVfxRect = hpGaugeSideVfxInstance.GetComponent<RectTransform>();
+        hpGaugeSideVfxCanvasGroup = hpGaugeSideVfxInstance.GetComponent<CanvasGroup>();
+        if (hpGaugeSideVfxCanvasGroup == null)
+            hpGaugeSideVfxCanvasGroup = hpGaugeSideVfxInstance.AddComponent<CanvasGroup>();
+
+        hpGaugeSideVfxAlpha = 0f;
+        hpGaugeSideVfxCanvasGroup.alpha = 0f;
+        hpGaugeSideVfxInBattleRange = false;
+        hpGaugeSideVfxInstance.SetActive(false);
+
         if (hpGaugeSideVfxRect != null)
             hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
     }
@@ -1112,7 +1144,19 @@ public class CharController_Motor : MonoBehaviour {
     void UpdateHpGaugeSideVfxPosition(){
         EnsureHpGaugeSideVfx();
 
-        if (hpGaugeSideVfxRect == null)
+        if (hpGaugeSideVfxRect == null || hpGaugeSideVfxCanvasGroup == null)
+            return;
+
+        RefreshRadarEnemyTargetsIfNeeded();
+        bool nearEnemy = IsAnyEnemyNearForHpGaugeVfx();
+        float targetAlpha = nearEnemy ? 1f : 0f;
+        hpGaugeSideVfxAlpha = Mathf.MoveTowards(hpGaugeSideVfxAlpha, targetAlpha, Mathf.Max(0.01f, hpGaugeSideVfxFadeSpeed) * Time.deltaTime);
+
+        bool shouldBeActive = targetAlpha > 0.001f || hpGaugeSideVfxAlpha > 0.001f;
+        if (hpGaugeSideVfxInstance.activeSelf != shouldBeActive)
+            hpGaugeSideVfxInstance.SetActive(shouldBeActive);
+
+        if (!shouldBeActive)
             return;
 
         Rect gaugeRect = GetHealthGaugeRect();
@@ -1127,6 +1171,35 @@ public class CharController_Motor : MonoBehaviour {
             targetGuiX - Screen.width * 0.5f,
             targetScreenY - Screen.height * 0.5f);
         hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
+        hpGaugeSideVfxCanvasGroup.alpha = hpGaugeSideVfxAlpha;
+    }
+
+    bool IsAnyEnemyNearForHpGaugeVfx(){
+        float enterDistance = Mathf.Max(0.1f, hpGaugeSideVfxEnemyEnterDistance);
+        float exitDistance = Mathf.Max(enterDistance, hpGaugeSideVfxEnemyExitDistance);
+        float threshold = hpGaugeSideVfxInBattleRange ? exitDistance : enterDistance;
+        float thresholdSq = threshold * threshold;
+
+        Vector3 playerPos = transform.position;
+        bool nearEnemy = false;
+
+        for (int i = radarEnemyTargets.Count - 1; i >= 0; i--){
+            Transform enemy = radarEnemyTargets[i];
+            if (enemy == null){
+                radarEnemyTargets.RemoveAt(i);
+                continue;
+            }
+
+            Vector3 diff = enemy.position - playerPos;
+            diff.y = 0f;
+            if (diff.sqrMagnitude <= thresholdSq){
+                nearEnemy = true;
+                break;
+            }
+        }
+
+        hpGaugeSideVfxInBattleRange = nearEnemy;
+        return nearEnemy;
     }
 
     void DestroyHpGaugeSideVfx(){
@@ -1135,6 +1208,9 @@ public class CharController_Motor : MonoBehaviour {
 
         hpGaugeSideVfxInstance = null;
         hpGaugeSideVfxRect = null;
+        hpGaugeSideVfxCanvasGroup = null;
+        hpGaugeSideVfxAlpha = 0f;
+        hpGaugeSideVfxInBattleRange = false;
     }
 
     void TryAssignHudVfxPrefabsInEditor(){
