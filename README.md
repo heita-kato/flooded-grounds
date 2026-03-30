@@ -1,5 +1,7 @@
 # BATTLES IN FLOODED GROUNDS
 
+<img width="2724" height="1568" alt="BATTLES_IN_FLOODED_GROUNDS_keyvisual" src="https://github.com/user-attachments/assets/76e9c5e9-1df6-4539-803d-153483fe1c50" />
+
 Battles in Flooded Grounds は、Unity 2022 LTS で構築された 3D アクション試作プロジェクトです。  
 タイトル画面からゲーム本編へ遷移し、敵 AI・ゴースト会話・透明化（Dissolve）・HUD 表示などを含む構成になっています。
 
