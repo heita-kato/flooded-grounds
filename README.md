@@ -111,4 +111,30 @@ Unity メニュー `Tools/Flooded Grounds` からセットアップ補助を利�
 
 ## 注意
 
-- 本リポジトリには含まれていませんが、アセットストア由来を含む複数アセットを利用しています。
+- 本リポジトリでは一部アセットストア由来を含む複数アセットを利用しています。
+
+## ブランチ差分メモ（main vs feature-audiosource）
+
+`feature-audiosource` 以下はAudioSource版の概要です。
+
+- 追加アセット:
+  - `Assets/Flooded_Grounds/Resources/Music/` に BGM 3 曲（title / main / battle）
+  - `Assets/Flooded_Grounds/Resources/Sounds/` に足音、ジャンプ、ゴースト音声、敵攻撃音、ダメージ音、可視/不可視 SE を追加
+- 追加スクリプト:
+  - `Assets/Flooded_Grounds/Scripts/FPSController/BgmCrossfadeController.cs`
+    - プレイヤーと敵距離に応じて main/battle BGM をクロスフェード
+    - タイトルシーンでは BGM を停止
+    - RuntimeInitializeOnLoadMethod で常駐コントローラを生成
+- 変更スクリプト:
+  - `Assets/Flooded_Grounds/Scripts/FPSController/CharController_Motor.cs`
+    - 足音ループ（草/水、歩き/走り）
+    - ジャンプ開始/着地 SE
+    - ゴースト会話に音声再生を追加
+    - 透明化状態に連動した AudioLowPassFilter（全体こもり効果）
+    - HUD 側 VFX の表示制御拡張
+  - `Assets/Flooded_Grounds/Scripts/Enemies/DungeonSkeletonEnemyAI.cs`
+    - 敵のボイス再生（距離減衰・個体割当）
+    - 攻撃時の攻撃 SE + ダメージ SE
+    - 敵歩行ループ音
+  - `Assets/Flooded_Grounds/Scripts/UI/TitleSceneController.cs`
+    - タイトル BGM と Start 効果音再生
