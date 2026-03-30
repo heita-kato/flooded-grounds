@@ -32,6 +32,7 @@ public class CharController_Motor : MonoBehaviour {
     [HideInInspector] public float acceleration = 5.0f;
     [HideInInspector] public float deceleration = 10.0f;
     [HideInInspector] public float WaterHeight = 15.5f;
+    [HideInInspector] public float maxWaterSubmergeDepth = 0.85f;
     [HideInInspector] public float waterSurfaceSupportDepth = 1.2f;
     [HideInInspector] public float groundStickForce = 2.0f;
     [HideInInspector] public float inputDeadZone = 0.2f;
@@ -89,6 +90,11 @@ public class CharController_Motor : MonoBehaviour {
     public Material dissolveFallbackMaterial;
     public bool logInvisibilityIssues = true;
 
+    [Header("Invisibility Audio")]
+    [Range(10f, 22000f)] public float normalLowPassCutoffHz = 22000f;
+    [Range(10f, 22000f)] public float invisibleLowPassCutoffHz = 1200f;
+    public float lowPassTransitionSeconds = 0.25f;
+
     [Header("HUD")]
     public float invisIconFadeSpeed = 7.5f;
     public float radarSize = 140f;
@@ -101,6 +107,9 @@ public class CharController_Motor : MonoBehaviour {
     public GameObject hpGaugeSideVfxPrefab;
     public Vector2 hpGaugeSideVfxOffset = new Vector2(52f, 12f);
     public Vector3 hpGaugeSideVfxScale = new Vector3(0.42f, 0.42f, 0.42f);
+    public float hpGaugeSideVfxEnemyEnterDistance = 14f;
+    public float hpGaugeSideVfxEnemyExitDistance = 20f;
+    public float hpGaugeSideVfxFadeSpeed = 3.2f;
 
     [Header("Debug")]
     public bool showDebugInfo = true;
@@ -161,6 +170,49 @@ public class CharController_Motor : MonoBehaviour {
     bool createdHudOverlayCanvas;
     GameObject hpGaugeSideVfxInstance;
     RectTransform hpGaugeSideVfxRect;
+    CanvasGroup hpGaugeSideVfxCanvasGroup;
+    float hpGaugeSideVfxAlpha;
+    bool hpGaugeSideVfxInBattleRange;
+
+    // --- 足音効果音 ---
+    AudioSource footstepAudioSource;
+    AudioClip fstepWalkGrass;
+    AudioClip fstepRunGrass;
+    AudioClip fstepWalkWater;
+    AudioClip fstepRunWater;
+    AudioClip currentFootstepClip;
+    Coroutine footstepFadeRoutine;
+    AudioSource movementOneShotAudioSource;
+    AudioClip jumpStartClip;
+    AudioClip jumpEndClip;
+    AudioClip ghostVoice1Clip;
+    AudioClip ghostVoice23Clip;
+    AudioClip ghostVoice4Clip;
+    AudioClip invisibleSeClip;
+    AudioClip visibleSeClip;
+    AudioLowPassFilter listenerLowPassFilter;
+    bool createdListenerLowPassFilter;
+    float currentLowPassCutoffHz = 22000f;
+
+    [Header("Audio Volumes (Player)")]
+    [Range(0f, 1f)] public float footstepVolume = 0.85f;
+    [Range(0f, 1f)] public float footstepWalkGrassVolume = 1f;
+    [Range(0f, 1f)] public float footstepRunGrassVolume = 1f;
+    [Range(0f, 1f)] public float footstepWalkWaterVolume = 1f;
+    [Range(0f, 1f)] public float footstepRunWaterVolume = 1f;
+    [Range(0f, 1f)] public float jumpStartVolume = 1f;
+    [Range(0f, 1f)] public float jumpEndVolume = 1f;
+    [Range(0f, 1f)] public float ghostVoice1Volume = 1f;
+    [Range(0f, 1f)] public float ghostVoice23Volume = 1f;
+    [Range(0f, 1f)] public float ghostVoice4Volume = 1f;
+    [Range(0f, 1f)] public float invisibleSeVolume = 1f;
+    [Range(0f, 1f)] public float visibleSeVolume = 1f;
+    public float footstepFadeInSeconds = 0.08f;
+    public float footstepFadeOutSeconds = 0.12f;
+    public float footstepLiveVolumeAdjustSpeed = 8f;
+
+    float currentFootstepTargetVolume;
+    bool isInWaterSurface;
 
     // アニメーション状態
     MoveState currentAnim = MoveState.Idle;
@@ -197,6 +249,113 @@ public class CharController_Motor : MonoBehaviour {
         TryAssignHudVfxPrefabsInEditor();
         EnsureHudOverlayCanvas();
         EnsureHpGaugeSideVfx();
+        InitializeFootstepAudio();
+        InitializeMovementOneShotAudio();
+        SetupInvisibilityLowPassFilter();
+        ApplyLowPassCutoffInstant(normalLowPassCutoffHz);
+    }
+
+    void InitializeFootstepAudio(){
+        // 足音専用のAudioSourceを用意
+        if (footstepAudioSource == null){
+            footstepAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        footstepAudioSource.playOnAwake = false;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.volume = 0f;
+
+        // 効果音クリップをResources/Soundsから読み込む
+        fstepWalkGrass = Resources.Load<AudioClip>("Sounds/fstep_walk_grass");
+        fstepRunGrass = Resources.Load<AudioClip>("Sounds/fstep_run_grass");
+        fstepWalkWater = Resources.Load<AudioClip>("Sounds/fstep_walk_water");
+        fstepRunWater = Resources.Load<AudioClip>("Sounds/fstep_run_water");
+
+        if (fstepWalkGrass == null) Debug.LogWarning("fstep_walk_grass クリップが見つかりません");
+        if (fstepRunGrass == null) Debug.LogWarning("fstep_run_grass クリップが見つかりません");
+        if (fstepWalkWater == null) Debug.LogWarning("fstep_walk_water クリップが見つかりません");
+        if (fstepRunWater == null) Debug.LogWarning("fstep_run_water クリップが見つかりません");
+    }
+
+    void InitializeMovementOneShotAudio(){
+        if (movementOneShotAudioSource == null)
+            movementOneShotAudioSource = gameObject.AddComponent<AudioSource>();
+
+        movementOneShotAudioSource.playOnAwake = false;
+        movementOneShotAudioSource.loop = false;
+        movementOneShotAudioSource.volume = 1f;
+
+        jumpStartClip = Resources.Load<AudioClip>("Sounds/jump_start");
+        jumpEndClip = Resources.Load<AudioClip>("Sounds/jump_end");
+        ghostVoice1Clip = Resources.Load<AudioClip>("Sounds/ghost_voice1");
+        ghostVoice23Clip = Resources.Load<AudioClip>("Sounds/ghost_voice23");
+        ghostVoice4Clip = Resources.Load<AudioClip>("Sounds/ghost_voice4");
+        invisibleSeClip = Resources.Load<AudioClip>("Sounds/invisible_se");
+        visibleSeClip = Resources.Load<AudioClip>("Sounds/visible_se");
+
+        if (jumpStartClip == null) Debug.LogWarning("jump_start クリップが見つかりません");
+        if (jumpEndClip == null) Debug.LogWarning("jump_end クリップが見つかりません");
+        if (ghostVoice1Clip == null) Debug.LogWarning("ghost_voice1 クリップが見つかりません");
+        if (ghostVoice23Clip == null) Debug.LogWarning("ghost_voice23 クリップが見つかりません");
+        if (ghostVoice4Clip == null) Debug.LogWarning("ghost_voice4 クリップが見つかりません");
+        if (invisibleSeClip == null) Debug.LogWarning("invisible_se クリップが見つかりません");
+        if (visibleSeClip == null) Debug.LogWarning("visible_se クリップが見つかりません");
+    }
+
+    void SetupInvisibilityLowPassFilter(){
+        if (listenerLowPassFilter != null)
+            return;
+
+        AudioListener listener = null;
+        if (cam != null)
+            listener = cam.GetComponentInChildren<AudioListener>(true);
+
+        if (listener == null)
+            listener = FindObjectOfType<AudioListener>();
+
+        if (listener == null){
+            if (logInvisibilityIssues)
+                Debug.LogWarning("[CharController_Motor] AudioListener が見つからないため、透明化ローパスを適用できません。");
+            return;
+        }
+
+        listenerLowPassFilter = listener.GetComponent<AudioLowPassFilter>();
+        if (listenerLowPassFilter == null){
+            listenerLowPassFilter = listener.gameObject.AddComponent<AudioLowPassFilter>();
+            createdListenerLowPassFilter = true;
+        }
+
+        listenerLowPassFilter.enabled = true;
+    }
+
+    void UpdateInvisibilityLowPassFilter(){
+        if (listenerLowPassFilter == null)
+            SetupInvisibilityLowPassFilter();
+
+        if (listenerLowPassFilter == null)
+            return;
+
+        float normal = Mathf.Clamp(normalLowPassCutoffHz, 10f, 22000f);
+        float invisible = Mathf.Clamp(invisibleLowPassCutoffHz, 10f, 22000f);
+        float targetCutoff = isInvisible ? invisible : normal;
+        float duration = Mathf.Max(0.01f, lowPassTransitionSeconds);
+        float speed = Mathf.Abs(normal - invisible) / duration;
+
+        if (speed <= 0.0001f)
+            currentLowPassCutoffHz = targetCutoff;
+        else
+            currentLowPassCutoffHz = Mathf.MoveTowards(currentLowPassCutoffHz, targetCutoff, speed * Time.deltaTime);
+
+        listenerLowPassFilter.cutoffFrequency = currentLowPassCutoffHz;
+    }
+
+    void ApplyLowPassCutoffInstant(float cutoffHz){
+        if (listenerLowPassFilter == null)
+            SetupInvisibilityLowPassFilter();
+
+        currentLowPassCutoffHz = Mathf.Clamp(cutoffHz, 10f, 22000f);
+        if (listenerLowPassFilter != null)
+            listenerLowPassFilter.cutoffFrequency = currentLowPassCutoffHz;
     }
 
     void CheckForWaterHeight(){
@@ -206,6 +365,8 @@ public class CharController_Motor : MonoBehaviour {
     void Update(){
         if (Input.GetKeyDown(invisibilityToggleKey))
             SetInvisibility(!isInvisible);
+
+        UpdateInvisibilityLowPassFilter();
 
         float iconTarget = isInvisible ? 1f : 0f;
         invisibilityIconBlend = Mathf.MoveTowards(invisibilityIconBlend, iconTarget, Mathf.Max(0.01f, invisIconFadeSpeed) * Time.deltaTime);
@@ -255,6 +416,7 @@ public class CharController_Motor : MonoBehaviour {
             horizontalSpeed = 0f;
 
         CheckForWaterHeight();
+        isInWaterSurface = IsPlayerInWater();
         bool isGroundedLike = character.isGrounded || IsWithinWaterSurfaceSupportRange();
 
         // --- 水平移動 ---
@@ -290,9 +452,11 @@ public class CharController_Motor : MonoBehaviour {
         verticalVelocity += gravity * Time.deltaTime;
         Vector3 finalMovement = (movement * horizontalSpeed) + (Vector3.up * verticalVelocity);
         character.Move(finalMovement * Time.deltaTime);
+        ClampPlayerHeightInWater();
 
         // --- アニメーション更新 ---
         UpdateAnimator(hasInput, isRunning, isGroundedLike);
+        UpdateFootstepAudio();
 
         // --- ゴースト会話入力 ---
         if (IsGhostInteractPressed()){
@@ -354,6 +518,7 @@ public class CharController_Motor : MonoBehaviour {
     void StartGhostDialogue(Transform ghost){
         isGhostDialogueActive = true;
         ghostMessageIndex = 0;
+        PlayGhostDialogueVoiceForIndex(ghostMessageIndex);
 
         if (orbitCamera == null && cam != null)
             orbitCamera = cam.GetComponent<ThirdPersonOrbitCamera>();
@@ -375,6 +540,34 @@ public class CharController_Motor : MonoBehaviour {
         ghostMessageIndex++;
         if (ghostMessageIndex >= messageCount)
             EndGhostDialogue();
+        else
+            PlayGhostDialogueVoiceForIndex(ghostMessageIndex);
+    }
+
+    void PlayGhostDialogueVoiceForIndex(int messageIndex){
+        if (movementOneShotAudioSource == null)
+            return;
+
+        AudioClip clip = null;
+        float volume = 1f;
+        if (messageIndex == 0)
+        {
+            clip = ghostVoice1Clip;
+            volume = ghostVoice1Volume;
+        }
+        else if (messageIndex == 1 || messageIndex == 2)
+        {
+            clip = ghostVoice23Clip;
+            volume = ghostVoice23Volume;
+        }
+        else if (messageIndex == 3)
+        {
+            clip = ghostVoice4Clip;
+            volume = ghostVoice4Volume;
+        }
+
+        if (clip != null)
+            movementOneShotAudioSource.PlayOneShot(clip, Mathf.Clamp01(volume));
     }
 
     void EndGhostDialogue(){
@@ -413,6 +606,8 @@ public class CharController_Motor : MonoBehaviour {
 
     void UpdateAnimator(bool hasInput, bool isRunning, bool isGroundedLike){
         if (animator == null) return;
+
+        MoveState previousAnim = currentAnim;
 
         // 優先度：空中(ジャンプ/落下) > 走る > 歩く > 待機
         MoveState targetAnim;
@@ -485,6 +680,192 @@ public class CharController_Motor : MonoBehaviour {
 
         if (transitioned)
             currentAnim = resolvedAnim;
+
+        if (currentAnim != previousAnim){
+            bool enteredJump = currentAnim == MoveState.Jump && previousAnim != MoveState.Jump;
+            bool landed = (previousAnim == MoveState.Jump || previousAnim == MoveState.Fall) && IsGroundMoveState(currentAnim);
+
+            if (enteredJump)
+                PlayJumpStartSound();
+
+            if (landed)
+                PlayJumpEndSound();
+        }
+    }
+
+    bool IsGroundMoveState(MoveState state){
+        return state == MoveState.Idle || state == MoveState.Walk || state == MoveState.Run;
+    }
+
+    void PlayJumpStartSound(){
+        if (movementOneShotAudioSource == null || jumpStartClip == null)
+            return;
+
+        movementOneShotAudioSource.PlayOneShot(jumpStartClip, Mathf.Clamp01(jumpStartVolume));
+    }
+
+    void PlayJumpEndSound(){
+        if (movementOneShotAudioSource == null || jumpEndClip == null)
+            return;
+
+        movementOneShotAudioSource.PlayOneShot(jumpEndClip, Mathf.Clamp01(jumpEndVolume));
+    }
+
+    void UpdateFootstepAudio(){
+        if (footstepAudioSource == null) return;
+
+        // 現在の状態に応じた足音クリップを決定
+        AudioClip targetClip = null;
+
+        if (currentAnim == MoveState.Walk){
+            targetClip = isInWaterSurface ? fstepWalkWater : fstepWalkGrass;
+        } else if (currentAnim == MoveState.Run){
+            targetClip = isInWaterSurface ? fstepRunWater : fstepRunGrass;
+        }
+
+        currentFootstepTargetVolume = GetFootstepTargetVolume(targetClip);
+
+        if (targetClip == null){
+            if (currentFootstepClip != null || footstepAudioSource.isPlaying)
+                StopFootstepWithFade();
+            return;
+        }
+
+        if (currentFootstepClip == targetClip){
+            if (!footstepAudioSource.isPlaying)
+                StartFootstepWithFade(targetClip);
+            else if (footstepFadeRoutine == null)
+                footstepAudioSource.volume = Mathf.MoveTowards(footstepAudioSource.volume, currentFootstepTargetVolume, Mathf.Max(0f, footstepLiveVolumeAdjustSpeed) * Time.deltaTime);
+            return;
+        }
+
+        currentFootstepClip = targetClip;
+        if (!footstepAudioSource.isPlaying){
+            StartFootstepWithFade(targetClip);
+            return;
+        }
+
+        SwitchFootstepWithFade(targetClip);
+    }
+
+    float GetFootstepTargetVolume(AudioClip clip){
+        float master = Mathf.Clamp01(footstepVolume);
+        if (clip == null)
+            return 0f;
+
+        if (clip == fstepWalkGrass)
+            return master * Mathf.Clamp01(footstepWalkGrassVolume);
+        if (clip == fstepRunGrass)
+            return master * Mathf.Clamp01(footstepRunGrassVolume);
+        if (clip == fstepWalkWater)
+            return master * Mathf.Clamp01(footstepWalkWaterVolume);
+        if (clip == fstepRunWater)
+            return master * Mathf.Clamp01(footstepRunWaterVolume);
+
+        return master;
+    }
+
+    bool IsPlayerInWater(){
+        return transform.position.y < WaterHeight;
+    }
+
+    void ClampPlayerHeightInWater(){
+        if (!IsPlayerInWater())
+            return;
+
+        float clampedDepth = Mathf.Max(0f, maxWaterSubmergeDepth);
+        float minAllowedY = WaterHeight - clampedDepth;
+
+        if (transform.position.y < minAllowedY){
+            Vector3 pos = transform.position;
+            pos.y = minAllowedY;
+            transform.position = pos;
+
+            if (verticalVelocity < 0f)
+                verticalVelocity = 0f;
+        }
+    }
+
+    void StartFootstepWithFade(AudioClip clip){
+        if (clip == null || footstepAudioSource == null)
+            return;
+
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        footstepAudioSource.clip = clip;
+        footstepAudioSource.volume = 0f;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.Play();
+        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(currentFootstepTargetVolume, Mathf.Max(0f, footstepFadeInSeconds), false));
+    }
+
+    void StopFootstepWithFade(){
+        if (footstepAudioSource == null)
+            return;
+
+        currentFootstepClip = null;
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        if (!footstepAudioSource.isPlaying){
+            footstepAudioSource.clip = null;
+            footstepAudioSource.volume = 0f;
+            return;
+        }
+
+        footstepFadeRoutine = StartCoroutine(FadeFootstepVolume(0f, Mathf.Max(0f, footstepFadeOutSeconds), true));
+    }
+
+    void SwitchFootstepWithFade(AudioClip nextClip){
+        if (nextClip == null || footstepAudioSource == null)
+            return;
+
+        if (footstepFadeRoutine != null)
+            StopCoroutine(footstepFadeRoutine);
+
+        footstepFadeRoutine = StartCoroutine(FadeSwitchRoutine(nextClip));
+    }
+
+    IEnumerator FadeSwitchRoutine(AudioClip nextClip){
+        float fadeOut = Mathf.Max(0f, footstepFadeOutSeconds * 0.65f);
+        float fadeIn = Mathf.Max(0f, footstepFadeInSeconds * 0.65f);
+
+        yield return FadeFootstepVolume(0f, fadeOut, false);
+
+        footstepAudioSource.Stop();
+        footstepAudioSource.clip = nextClip;
+        footstepAudioSource.volume = 0f;
+        footstepAudioSource.loop = true;
+        footstepAudioSource.Play();
+
+        yield return FadeFootstepVolume(currentFootstepTargetVolume, fadeIn, false);
+    }
+
+    IEnumerator FadeFootstepVolume(float targetVolume, float duration, bool stopAfterFade){
+        if (footstepAudioSource == null)
+            yield break;
+
+        float startVolume = footstepAudioSource.volume;
+        if (duration <= 0.0001f){
+            footstepAudioSource.volume = targetVolume;
+        } else {
+            float elapsed = 0f;
+            while (elapsed < duration){
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                footstepAudioSource.volume = Mathf.Lerp(startVolume, targetVolume, t);
+                yield return null;
+            }
+            footstepAudioSource.volume = targetVolume;
+        }
+
+        if (stopAfterFade && footstepAudioSource.volume <= 0.0001f){
+            footstepAudioSource.Stop();
+            footstepAudioSource.clip = null;
+        }
+
+        footstepFadeRoutine = null;
     }
 
     bool IsWithinWaterSurfaceSupportRange(){
@@ -569,10 +950,11 @@ public class CharController_Motor : MonoBehaviour {
             GUI.Label(new Rect(10, 10, 400, 30), debugText, debugLabelStyle);
             
             // 追加情報：速度、状態
-            string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: ground";
+            string surfaceType = isInWaterSurface ? "water" : "ground";
+            string stateText = $"State: {currentAnim} | Speed: {horizontalSpeed:F2} m/s | Surface type: {surfaceType}";
             GUI.Label(new Rect(10, 40, 400, 30), stateText, debugLabelStyle);
 
-            string testText = $"Sound: Background music";
+            string testText = $"BGM: {GetCurrentPlayingBgmName()}";
             GUI.Label(new Rect(10, 70, 400, 30), testText, debugLabelStyle);
         }
 
@@ -624,6 +1006,23 @@ public class CharController_Motor : MonoBehaviour {
 
     public bool IsInvisible(){
         return isInvisible;
+    }
+
+    string GetCurrentPlayingBgmName(){
+        GameObject bgmRoot = GameObject.Find("BgmCrossfadeController_Runtime");
+        if (bgmRoot == null)
+            return "None";
+
+        AudioSource[] sources = bgmRoot.GetComponents<AudioSource>();
+        for (int i = 0; i < sources.Length; i++){
+            AudioSource source = sources[i];
+            if (source == null || !source.isPlaying || source.clip == null)
+                continue;
+
+            return source.clip.name;
+        }
+
+        return "None";
     }
 
     string GetCurrentGhostMessage(){
@@ -729,6 +1128,15 @@ public class CharController_Motor : MonoBehaviour {
 
         hpGaugeSideVfxInstance = Instantiate(hpGaugeSideVfxPrefab, hudOverlayCanvas.transform, false);
         hpGaugeSideVfxRect = hpGaugeSideVfxInstance.GetComponent<RectTransform>();
+        hpGaugeSideVfxCanvasGroup = hpGaugeSideVfxInstance.GetComponent<CanvasGroup>();
+        if (hpGaugeSideVfxCanvasGroup == null)
+            hpGaugeSideVfxCanvasGroup = hpGaugeSideVfxInstance.AddComponent<CanvasGroup>();
+
+        hpGaugeSideVfxAlpha = 0f;
+        hpGaugeSideVfxCanvasGroup.alpha = 0f;
+        hpGaugeSideVfxInBattleRange = false;
+        hpGaugeSideVfxInstance.SetActive(false);
+
         if (hpGaugeSideVfxRect != null)
             hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
     }
@@ -736,7 +1144,19 @@ public class CharController_Motor : MonoBehaviour {
     void UpdateHpGaugeSideVfxPosition(){
         EnsureHpGaugeSideVfx();
 
-        if (hpGaugeSideVfxRect == null)
+        if (hpGaugeSideVfxRect == null || hpGaugeSideVfxCanvasGroup == null)
+            return;
+
+        RefreshRadarEnemyTargetsIfNeeded();
+        bool nearEnemy = IsAnyEnemyNearForHpGaugeVfx();
+        float targetAlpha = nearEnemy ? 1f : 0f;
+        hpGaugeSideVfxAlpha = Mathf.MoveTowards(hpGaugeSideVfxAlpha, targetAlpha, Mathf.Max(0.01f, hpGaugeSideVfxFadeSpeed) * Time.deltaTime);
+
+        bool shouldBeActive = targetAlpha > 0.001f || hpGaugeSideVfxAlpha > 0.001f;
+        if (hpGaugeSideVfxInstance.activeSelf != shouldBeActive)
+            hpGaugeSideVfxInstance.SetActive(shouldBeActive);
+
+        if (!shouldBeActive)
             return;
 
         Rect gaugeRect = GetHealthGaugeRect();
@@ -751,6 +1171,35 @@ public class CharController_Motor : MonoBehaviour {
             targetGuiX - Screen.width * 0.5f,
             targetScreenY - Screen.height * 0.5f);
         hpGaugeSideVfxRect.localScale = hpGaugeSideVfxScale;
+        hpGaugeSideVfxCanvasGroup.alpha = hpGaugeSideVfxAlpha;
+    }
+
+    bool IsAnyEnemyNearForHpGaugeVfx(){
+        float enterDistance = Mathf.Max(0.1f, hpGaugeSideVfxEnemyEnterDistance);
+        float exitDistance = Mathf.Max(enterDistance, hpGaugeSideVfxEnemyExitDistance);
+        float threshold = hpGaugeSideVfxInBattleRange ? exitDistance : enterDistance;
+        float thresholdSq = threshold * threshold;
+
+        Vector3 playerPos = transform.position;
+        bool nearEnemy = false;
+
+        for (int i = radarEnemyTargets.Count - 1; i >= 0; i--){
+            Transform enemy = radarEnemyTargets[i];
+            if (enemy == null){
+                radarEnemyTargets.RemoveAt(i);
+                continue;
+            }
+
+            Vector3 diff = enemy.position - playerPos;
+            diff.y = 0f;
+            if (diff.sqrMagnitude <= thresholdSq){
+                nearEnemy = true;
+                break;
+            }
+        }
+
+        hpGaugeSideVfxInBattleRange = nearEnemy;
+        return nearEnemy;
     }
 
     void DestroyHpGaugeSideVfx(){
@@ -759,6 +1208,9 @@ public class CharController_Motor : MonoBehaviour {
 
         hpGaugeSideVfxInstance = null;
         hpGaugeSideVfxRect = null;
+        hpGaugeSideVfxCanvasGroup = null;
+        hpGaugeSideVfxAlpha = 0f;
+        hpGaugeSideVfxInBattleRange = false;
     }
 
     void TryAssignHudVfxPrefabsInEditor(){
@@ -1194,6 +1646,12 @@ public class CharController_Motor : MonoBehaviour {
         if (createdHudOverlayCanvas && hudOverlayCanvas != null)
             Destroy(hudOverlayCanvas.gameObject);
 
+        if (listenerLowPassFilter != null){
+            listenerLowPassFilter.cutoffFrequency = Mathf.Clamp(normalLowPassCutoffHz, 10f, 22000f);
+            if (createdListenerLowPassFilter)
+                Destroy(listenerLowPassFilter);
+        }
+
         CleanupRuntimeDissolveInstances();
 
         if (hpGaugeBackgroundTex != null)
@@ -1298,13 +1756,26 @@ public class CharController_Motor : MonoBehaviour {
         if (dissolveMaterials.Count == 0 && !BuildDissolveMaterialsFromTemplate())
             return;
 
+        if (isInvisible == makeInvisible)
+            return;
+
         isInvisible = makeInvisible;
         float target = isInvisible ? invisibleDissolveAmount : visibleDissolveAmount;
+        PlayInvisibilityToggleSound(isInvisible);
 
         if (dissolveRoutine != null)
             StopCoroutine(dissolveRoutine);
 
         dissolveRoutine = StartCoroutine(AnimateDissolve(target));
+    }
+
+    void PlayInvisibilityToggleSound(bool nowInvisible){
+        if (movementOneShotAudioSource == null)
+            return;
+
+        AudioClip clip = nowInvisible ? invisibleSeClip : visibleSeClip;
+        if (clip != null)
+            movementOneShotAudioSource.PlayOneShot(clip, Mathf.Clamp01(nowInvisible ? invisibleSeVolume : visibleSeVolume));
     }
 
     IEnumerator AnimateDissolve(float target){

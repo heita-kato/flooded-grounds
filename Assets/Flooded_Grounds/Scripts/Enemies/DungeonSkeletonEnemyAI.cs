@@ -49,6 +49,38 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     [Header("Debug")]
     public bool logAnimationIssues = true;
 
+    [Header("Voice")]
+    public float voiceIntervalMin = 4.0f;
+    public float voiceIntervalMax = 9.0f;
+    public float voiceHearDistance = 22.0f;
+    [Range(0f, 1f)] public float voiceMinVolume = 0.05f;
+    [Range(0f, 1f)] public float voiceMaxVolume = 0.85f;
+    [Range(0f, 1f)] public float voiceSpatialBlend = 1f;
+    public float voiceMinDistance = 2f;
+    public float voiceMaxDistance = 24f;
+    [Range(0f, 1f)] public float voice1Volume = 1f;
+    [Range(0f, 1f)] public float voice2Volume = 1f;
+    [Range(0f, 1f)] public float voice3Volume = 1f;
+
+    [Header("Attack SFX")]
+    public float attackSfxSpatialBlend = 1f;
+    public float attackSfxMinDistance = 1.5f;
+    public float attackSfxMaxDistance = 20f;
+    [Range(0f, 1f)] public float attackSfxVolume = 0.95f;
+    [Range(0f, 1f)] public float attack1Volume = 1f;
+    [Range(0f, 1f)] public float attack2Volume = 1f;
+    [Range(0f, 1f)] public float attack3Volume = 1f;
+    [Range(0f, 1f)] public float attack4Volume = 1f;
+    [Range(0f, 1f)] public float damageVolume = 1f;
+
+    [Header("Walk SFX")]
+    public float walkSfxHearDistance = 18f;
+    [Range(0f, 1f)] public float walkSfxMaxVolume = 0.6f;
+    public float walkSfxMinDistance = 1.2f;
+    public float walkSfxMaxDistance = 18f;
+    [Range(0f, 1f)] public float walkSfxSpatialBlend = 1f;
+    [Range(0f, 1f)] public float walkClipVolume = 1f;
+
     [Header("Lost Target Mark")]
     public float lostTargetMarkSeconds = 1.35f;
     public float lostTargetMarkHeight = 2.2f;
@@ -76,6 +108,17 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
     private bool wasPlayerInvisibleLastFrame;
     private float lostTargetMarkTimer;
     private Camera cachedRenderCamera;
+    private AudioSource voiceAudioSource;
+    private AudioSource attackSfxAudioSource;
+    private AudioSource walkLoopAudioSource;
+    private AudioClip assignedVoiceClip;
+    private float assignedVoiceVolume = 1f;
+    private AudioClip[] attackClips;
+    private float[] attackClipVolumes;
+    private AudioClip damageClip;
+    private AudioClip walkLoopClip;
+    private float voiceTimer;
+    private static int skeletonVoiceAssignCounter;
 
     private CharController_Motor playerMotor;
 
@@ -103,6 +146,9 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
             PlayState(idleHash, 0.05f);
         }
 
+        InitializeCombatAudio();
+        InitializeWalkLoopAudio();
+        InitializeVoiceAudio();
         ResolvePlayerReference();
         BeginIdle();
     }
@@ -121,6 +167,8 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         {
             attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - Time.deltaTime);
         }
+
+        UpdateVoicePlayback();
 
         ResolveOverlapWithNearbySkeletons();
 
@@ -158,6 +206,11 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         }
 
         UpdateWanderBehavior();
+    }
+
+    private void LateUpdate()
+    {
+        UpdateWalkLoopAudio();
     }
 
     private void OnGUI()
@@ -260,6 +313,230 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
         playerMotor = playerObj.GetComponent<CharController_Motor>();
     }
 
+    private void InitializeVoiceAudio()
+    {
+        if (voiceAudioSource == null)
+        {
+            voiceAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        voiceAudioSource.playOnAwake = false;
+        voiceAudioSource.loop = false;
+        voiceAudioSource.spatialBlend = Mathf.Clamp01(voiceSpatialBlend);
+        voiceAudioSource.minDistance = Mathf.Max(0.1f, voiceMinDistance);
+        voiceAudioSource.maxDistance = Mathf.Max(voiceAudioSource.minDistance + 0.1f, voiceMaxDistance);
+        voiceAudioSource.rolloffMode = AudioRolloffMode.Linear;
+
+        AudioClip[] voiceClips = new AudioClip[]
+        {
+            Resources.Load<AudioClip>("Sounds/skelton_voice1"),
+            Resources.Load<AudioClip>("Sounds/skelton_voice2"),
+            Resources.Load<AudioClip>("Sounds/skelton_voice3")
+        };
+        float[] voiceVolumes = new float[]
+        {
+            Mathf.Clamp01(voice1Volume),
+            Mathf.Clamp01(voice2Volume),
+            Mathf.Clamp01(voice3Volume)
+        };
+
+        int validCount = 0;
+        for (int i = 0; i < voiceClips.Length; i++)
+        {
+            if (voiceClips[i] != null)
+                validCount++;
+        }
+
+        if (validCount <= 0)
+        {
+            Debug.LogWarning("[DungeonSkeletonEnemyAI] skelton_voice クリップが見つかりません");
+            return;
+        }
+
+        AudioClip[] validClips = new AudioClip[validCount];
+        float[] validVolumes = new float[validCount];
+        int insert = 0;
+        for (int i = 0; i < voiceClips.Length; i++)
+        {
+            if (voiceClips[i] == null)
+                continue;
+
+            validClips[insert] = voiceClips[i];
+            validVolumes[insert] = voiceVolumes[i];
+            insert++;
+        }
+
+        int assignIndex = skeletonVoiceAssignCounter % validClips.Length;
+        skeletonVoiceAssignCounter++;
+        assignedVoiceClip = validClips[assignIndex];
+        assignedVoiceVolume = validVolumes[assignIndex];
+
+        float firstMax = Mathf.Max(0.25f, voiceIntervalMax);
+        voiceTimer = Random.Range(0.15f, firstMax);
+    }
+
+    private void InitializeCombatAudio()
+    {
+        if (attackSfxAudioSource == null)
+            attackSfxAudioSource = gameObject.AddComponent<AudioSource>();
+
+        attackSfxAudioSource.playOnAwake = false;
+        attackSfxAudioSource.loop = false;
+        attackSfxAudioSource.spatialBlend = Mathf.Clamp01(attackSfxSpatialBlend);
+        attackSfxAudioSource.minDistance = Mathf.Max(0.1f, attackSfxMinDistance);
+        attackSfxAudioSource.maxDistance = Mathf.Max(attackSfxAudioSource.minDistance + 0.1f, attackSfxMaxDistance);
+        attackSfxAudioSource.rolloffMode = AudioRolloffMode.Linear;
+
+        attackClips = new AudioClip[]
+        {
+            Resources.Load<AudioClip>("Sounds/skelton_attack1"),
+            Resources.Load<AudioClip>("Sounds/skelton_attack2"),
+            Resources.Load<AudioClip>("Sounds/skelton_attack3"),
+            Resources.Load<AudioClip>("Sounds/skelton_attack4")
+        };
+        attackClipVolumes = new float[]
+        {
+            Mathf.Clamp01(attack1Volume),
+            Mathf.Clamp01(attack2Volume),
+            Mathf.Clamp01(attack3Volume),
+            Mathf.Clamp01(attack4Volume)
+        };
+
+        damageClip = Resources.Load<AudioClip>("Sounds/damage");
+    }
+
+    private void InitializeWalkLoopAudio()
+    {
+        if (walkLoopAudioSource == null)
+            walkLoopAudioSource = gameObject.AddComponent<AudioSource>();
+
+        walkLoopAudioSource.playOnAwake = false;
+        walkLoopAudioSource.loop = true;
+        walkLoopAudioSource.spatialBlend = Mathf.Clamp01(walkSfxSpatialBlend);
+        walkLoopAudioSource.minDistance = Mathf.Max(0.1f, walkSfxMinDistance);
+        walkLoopAudioSource.maxDistance = Mathf.Max(walkLoopAudioSource.minDistance + 0.1f, walkSfxMaxDistance);
+        walkLoopAudioSource.rolloffMode = AudioRolloffMode.Linear;
+        walkLoopAudioSource.volume = 0f;
+
+        walkLoopClip = Resources.Load<AudioClip>("Sounds/skelton_walk");
+        walkLoopAudioSource.clip = walkLoopClip;
+    }
+
+    private void UpdateWalkLoopAudio()
+    {
+        if (walkLoopAudioSource == null || walkLoopClip == null)
+            return;
+
+        bool shouldLoop = currentState == EnemyState.Wander || currentState == EnemyState.Chase;
+        if (!shouldLoop)
+        {
+            if (walkLoopAudioSource.isPlaying)
+                walkLoopAudioSource.Stop();
+
+            walkLoopAudioSource.volume = 0f;
+            return;
+        }
+
+        float hearDistance = Mathf.Max(0.1f, walkSfxHearDistance);
+        float distanceFactor = 0f;
+        if (player != null)
+        {
+            float dist = Vector3.Distance(transform.position, player.position);
+            distanceFactor = Mathf.Clamp01(1f - (dist / hearDistance));
+        }
+
+        float targetVolume = Mathf.Clamp01(walkSfxMaxVolume) * Mathf.Clamp01(walkClipVolume) * distanceFactor;
+        walkLoopAudioSource.volume = targetVolume;
+
+        if (targetVolume <= 0.001f)
+        {
+            if (walkLoopAudioSource.isPlaying)
+                walkLoopAudioSource.Stop();
+            return;
+        }
+
+        if (!walkLoopAudioSource.isPlaying)
+            walkLoopAudioSource.Play();
+    }
+
+    private void PlayAttackHitSounds()
+    {
+        if (attackSfxAudioSource == null)
+            return;
+
+        attackSfxAudioSource.volume = Mathf.Clamp01(attackSfxVolume);
+
+        AudioClip attackClip = null;
+        float attackClipVolume = 1f;
+        if (attackClips != null && attackClips.Length > 0)
+        {
+            int validCount = 0;
+            for (int i = 0; i < attackClips.Length; i++)
+            {
+                if (attackClips[i] != null)
+                    validCount++;
+            }
+
+            if (validCount > 0)
+            {
+                int pick = Random.Range(0, validCount);
+                int cursor = 0;
+                for (int i = 0; i < attackClips.Length; i++)
+                {
+                    if (attackClips[i] == null)
+                        continue;
+
+                    if (cursor == pick)
+                    {
+                        attackClip = attackClips[i];
+                        if (attackClipVolumes != null && i < attackClipVolumes.Length)
+                            attackClipVolume = Mathf.Clamp01(attackClipVolumes[i]);
+                        break;
+                    }
+                    cursor++;
+                }
+            }
+        }
+
+        if (attackClip != null)
+            attackSfxAudioSource.PlayOneShot(attackClip, attackClipVolume);
+
+        if (damageClip != null)
+            attackSfxAudioSource.PlayOneShot(damageClip, Mathf.Clamp01(damageVolume));
+    }
+
+    private void UpdateVoicePlayback()
+    {
+        if (voiceAudioSource == null || assignedVoiceClip == null)
+            return;
+
+        float intervalMin = Mathf.Max(0.1f, voiceIntervalMin);
+        float intervalMax = Mathf.Max(intervalMin, voiceIntervalMax);
+        float hearDistance = Mathf.Max(0.1f, voiceHearDistance);
+
+        float distanceFactor = 0f;
+        if (player != null)
+        {
+            float dist = Vector3.Distance(transform.position, player.position);
+            distanceFactor = Mathf.Clamp01(1f - (dist / hearDistance));
+        }
+
+        float minVolume = Mathf.Clamp01(voiceMinVolume);
+        float maxVolume = Mathf.Clamp(minVolume, 1f, voiceMaxVolume);
+        voiceAudioSource.volume = Mathf.Lerp(minVolume, maxVolume, distanceFactor);
+
+        voiceTimer -= Time.deltaTime;
+        if (voiceTimer > 0f)
+            return;
+
+        voiceTimer = Random.Range(intervalMin, intervalMax);
+        if (distanceFactor <= 0.01f)
+            return;
+
+        if (!voiceAudioSource.isPlaying)
+            voiceAudioSource.PlayOneShot(assignedVoiceClip, Mathf.Clamp01(assignedVoiceVolume));
+    }
+
     private float GetPlayerDistance()
     {
         if (player == null)
@@ -340,6 +617,7 @@ public class DungeonSkeletonEnemyAI : MonoBehaviour
 
         int damage = Random.Range(3, 8);
         playerMotor.ApplySkeletonHit(damage, playerForcedIdleSeconds);
+        PlayAttackHitSounds();
 
         // Instantiate hit effect at player position
         if (hitEffectPrefab != null)

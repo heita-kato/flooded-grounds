@@ -127448,6 +127448,32 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  voice1Volume: 1
+  voice2Volume: 1
+  voice3Volume: 1
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  attack1Volume: 1
+  attack2Volume: 1
+  attack3Volume: 1
+  attack4Volume: 1
+  damageVolume: 1
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
+  walkClipVolume: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22
@@ -147149,6 +147175,32 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  voice1Volume: 1
+  voice2Volume: 1
+  voice3Volume: 1
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  attack1Volume: 1
+  attack2Volume: 1
+  attack3Volume: 1
+  attack4Volume: 1
+  damageVolume: 1
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
+  walkClipVolume: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22
@@ -201146,6 +201198,7 @@ MonoBehaviour:
   acceleration: 5
   deceleration: 5
   WaterHeight: 15.6
+  maxWaterSubmergeDepth: 0.85
   waterSurfaceSupportDepth: 1.2
   groundStickForce: 2
   inputDeadZone: 0.2
@@ -201185,6 +201238,9 @@ MonoBehaviour:
   invisibleDissolveAmount: 1
   dissolveFallbackMaterial: {fileID: 2100000, guid: 179555ab8bd66734b8c1ac67e84c7cbc, type: 2}
   logInvisibilityIssues: 1
+  normalLowPassCutoffHz: 22000
+  invisibleLowPassCutoffHz: 1200
+  lowPassTransitionSeconds: 0.25
   invisIconFadeSpeed: 2
   radarSize: 140
   radarDetectionRangeScale: 0.65
@@ -201194,7 +201250,25 @@ MonoBehaviour:
   hpGaugeSideVfxPrefab: {fileID: 0}
   hpGaugeSideVfxOffset: {x: 52, y: 12}
   hpGaugeSideVfxScale: {x: 0.42, y: 0.42, z: 0.42}
-  showDebugInfo: 0
+  hpGaugeSideVfxEnemyEnterDistance: 14
+  hpGaugeSideVfxEnemyExitDistance: 20
+  hpGaugeSideVfxFadeSpeed: 3.2
+  showDebugInfo: 1
+  footstepVolume: 0.85
+  footstepWalkGrassVolume: 1
+  footstepRunGrassVolume: 0.785
+  footstepWalkWaterVolume: 0.927
+  footstepRunWaterVolume: 0.794
+  jumpStartVolume: 1
+  jumpEndVolume: 0.332
+  ghostVoice1Volume: 1
+  ghostVoice23Volume: 1
+  ghostVoice4Volume: 1
+  invisibleSeVolume: 1
+  visibleSeVolume: 1
+  footstepFadeInSeconds: 0.08
+  footstepFadeOutSeconds: 0.12
+  footstepLiveVolumeAdjustSpeed: 8
 --- !u!143 &1780305044
 CharacterController:
   m_ObjectHideFlags: 0
@@ -237905,6 +237979,32 @@ MonoBehaviour:
   playerForcedIdleSeconds: 0.2
   hitEffectYOffset: 1
   logAnimationIssues: 1
+  voiceIntervalMin: 4
+  voiceIntervalMax: 9
+  voiceHearDistance: 22
+  voiceMinVolume: 0.05
+  voiceMaxVolume: 0.85
+  voiceSpatialBlend: 1
+  voiceMinDistance: 2
+  voiceMaxDistance: 24
+  voice1Volume: 1
+  voice2Volume: 1
+  voice3Volume: 1
+  attackSfxSpatialBlend: 1
+  attackSfxMinDistance: 1.5
+  attackSfxMaxDistance: 20
+  attackSfxVolume: 0.95
+  attack1Volume: 1
+  attack2Volume: 1
+  attack3Volume: 1
+  attack4Volume: 1
+  damageVolume: 1
+  walkSfxHearDistance: 18
+  walkSfxMaxVolume: 0.6
+  walkSfxMinDistance: 1.2
+  walkSfxMaxDistance: 18
+  walkSfxSpatialBlend: 1
+  walkClipVolume: 1
   lostTargetMarkSeconds: 1.35
   lostTargetMarkHeight: 2.2
   lostTargetMarkFloatPixels: 22
